@@ -5,6 +5,7 @@
 Roo Commander is an advanced configuration layer and opinionated workflow system *built specifically for* the [Roo Code](https://github.com/RooVetGit/Roo-Code) VS Code extension. It transforms your Roo Code experience by implementing a sophisticated framework for managing software development projects using a structured, **multi-agent approach**. Imagine having a virtual, specialized software team within your VS Code workspace, orchestrated by the 👑 Roo Commander, to handle tasks with specific expertise and maintain a clear project history.
 
 ---
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jezweb/roo-commander)
 
 **🐾 Join the Community:** [Roo Commander Discord](https://discord.gg/ESaJBnw7As)
 
