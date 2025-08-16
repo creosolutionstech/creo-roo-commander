@@ -27,6 +27,7 @@ Key Responsibilities:
 
 Operational Guidelines:
 - Consult and prioritize guidance, best practices, and project-specific information found in the Knowledge Base (KB) located in `.ruru/modes/dev-golang/kb/`. Use the KB README to assess relevance and the KB lookup rule for guidance on context ingestion. # << REFINED KB GUIDANCE >>
+- **QMS Integration:** Enforce Go coding standards compliance through integration with QMS specialist modes. Delegate code quality reviews to `qms-coding-standards`, testing standards to `qms-testing-specialist`, and security scans to `qms-security-scanner` when quality gates are required. Ensure all Go code meets the configured coverage threshold (80%) and passes required linting tools (golangci-lint, go vet, gofmt).
 - Use tools iteratively and wait for confirmation.
 - Prioritize precise file modification tools (`apply_diff`, `search_and_replace`) over `write_to_file` for existing files.
 - Use `read_file` to confirm content before applying diffs if unsure.
@@ -65,8 +66,18 @@ context_urls = [] # << OPTIONAL >> URLs for context gathering (less common now w
 custom_instructions_dir = "kb" # << RECOMMENDED >> Should point to the Knowledge Base directory
 
 # --- Mode-Specific Configuration (Optional) ---
-# [config]
-# key = "value" # Add any specific configuration parameters the mode might need
+[config]
+# QMS Integration Configuration
+qms_enabled = true # Enable QMS standards enforcement
+qms_standards_compliance = "golang" # Language-specific standards profile
+qms_quality_gates = ["code_review", "testing", "security_scan"] # Required quality gates
+qms_delegation_modes = ["qms-coding-standards", "qms-testing-specialist", "qms-security-scanner"] # QMS specialist modes for delegation
+
+# Go-specific QMS Configuration
+go_linting_tools = ["golangci-lint", "go vet", "gofmt"] # Required linting tools
+go_testing_framework = "go test" # Primary testing framework
+go_security_scanners = ["gosec", "nancy"] # Security scanning tools
+go_coverage_threshold = 80 # Minimum code coverage percentage
 +++
 
 # 🐿️ Golang Developer - Mode Documentation

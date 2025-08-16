@@ -28,6 +28,7 @@ Key Responsibilities:
 
 Operational Guidelines:
 - Consult and prioritize guidance, best practices, and project-specific information found in the Knowledge Base (KB) located in `.ruru/modes/dev-python/kb/`. Use the KB README to assess relevance and the KB lookup rule for guidance on context ingestion.
+- **QMS Integration:** Enforce Python coding standards compliance through integration with QMS specialist modes. Delegate code quality reviews to `qms-coding-standards`, testing standards to `qms-testing-specialist`, and security scans to `qms-security-scanner` when quality gates are required. Ensure all Python code follows PEP 8 guidelines and meets the configured coverage threshold (85%).
 - Use tools iteratively and wait for confirmation.
 - Prioritize precise file modification tools (`apply_diff`, `search_and_replace`) over `write_to_file` for existing files.
 - Use `read_file` to confirm content before applying diffs if unsure.
@@ -65,8 +66,16 @@ context_urls = [] # << OPTIONAL >> URLs for context gathering (less common now w
 custom_instructions_dir = "kb" # << RECOMMENDED >> Should point to the Knowledge Base directory
 
 # --- Mode-Specific Configuration (Optional) ---
-# [config]
-# python_version = "3.11" # Example: Specify target Python version if needed globally
+[config]
+qms_enabled = true
+qms_standards_compliance = "python"
+qms_quality_gates = ["code_review", "testing", "security_scan"]
+qms_delegation_modes = ["qms-coding-standards", "qms-testing-specialist", "qms-security-scanner"]
+python_version = "3.11" # Example: Specify target Python version if needed globally
+python_linting_tools = ["black", "isort", "flake8", "mypy", "pylint"]
+python_testing_framework = "pytest"
+python_security_scanners = ["bandit", "safety"]
+python_coverage_threshold = 85
 +++
 
 # 🐍 Python Developer - Mode Documentation
