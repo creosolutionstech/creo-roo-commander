@@ -1,0 +1,505 @@
+name: QMS Pull Request Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+      - develop
+      - 'release/**'
+      - 'hotfix/**'
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+env:
+  QMS_CODE_REVIEWER: 'qms-code-reviewer'
+  QMS_CODING_STANDARDS: 'qms-coding-standards'
+  QMS_DOR_VALIDATOR: 'qms-dor-validator'
+  QMS_COMPLIANCE_COORDINATOR: 'qms-compliance-coordinator'
+  QMS_QUALITY_COORDINATOR: 'qms-quality-coordinator'
+
+jobs:
+  detect-changes:
+    name: "🔍 Detect Changes & Language"
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+      has_code: ${{ steps.detect.outputs.has_code }}
+      has_tests: ${{ steps.detect.outputs.has_tests }}
+      has_docs: ${{ steps.detect.outputs.has_docs }}
+      complexity_score: ${{ steps.detect.outputs.complexity_score }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect languages and changes
+        id: detect
+        run: |
+          echo "🔍 QMS Change Detection Phase"
+          
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}..HEAD)
+          echo "Changed files: $CHANGED_FILES"
+          
+          # Detect languages
+          LANGUAGES=""
+          HAS_CODE=false
+          HAS_TESTS=false
+          HAS_DOCS=false
+          COMPLEXITY=0
+          
+          while IFS= read -r file; do
+            case "$file" in
+              *.go|go.mod|go.sum)
+                [[ "$LANGUAGES" != *"go"* ]] && LANGUAGES="${LANGUAGES},go"
+                HAS_CODE=true
+                ((COMPLEXITY += 2))
+                ;;
+              *.py|requirements*.txt|pyproject.toml|setup.py)
+                [[ "$LANGUAGES" != *"python"* ]] && LANGUAGES="${LANGUAGES},python"
+                HAS_CODE=true
+                ((COMPLEXITY += 2))
+                ;;
+              *.ts|*.tsx|tsconfig.json)
+                [[ "$LANGUAGES" != *"typescript"* ]] && LANGUAGES="${LANGUAGES},typescript"
+                HAS_CODE=true
+                ((COMPLEXITY += 2))
+                ;;
+              *.js|*.jsx|package.json|package-lock.json|yarn.lock)
+                [[ "$LANGUAGES" != *"javascript"* ]] && LANGUAGES="${LANGUAGES},javascript"
+                HAS_CODE=true
+                ((COMPLEXITY += 1))
+                ;;
+              *test*|*spec*|*.test.*|*.spec.*)
+                HAS_TESTS=true
+                ((COMPLEXITY += 1))
+                ;;
+              *.md|*.rst|*.txt|docs/*)
+                HAS_DOCS=true
+                ;;
+              *.yml|*.yaml|*.json|*.toml|*.ini|*.cfg|*.conf|Dockerfile|docker-compose.yml)
+                ((COMPLEXITY += 1))
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+          
+          # Clean up languages string
+          LANGUAGES="${LANGUAGES#,}"
+          [[ -z "$LANGUAGES" ]] && LANGUAGES="none"
+          
+          echo "languages=$LANGUAGES" >> $GITHUB_OUTPUT
+          echo "has_code=$HAS_CODE" >> $GITHUB_OUTPUT
+          echo "has_tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+          echo "has_docs=$HAS_DOCS" >> $GITHUB_OUTPUT
+          echo "complexity_score=$COMPLEXITY" >> $GITHUB_OUTPUT
+          
+          echo "✅ Detection complete - Languages: $LANGUAGES, Complexity: $COMPLEXITY"
+
+  pr-validation-checks:
+    name: "🛡️ QMS PR Validation"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJson(format('[{0}]', needs.detect-changes.outputs.languages == 'none' && '"general"' || format('"{0}"', needs.detect-changes.outputs.languages))) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Language Environment
+        run: |
+          echo "🔧 Setting up environment for ${{ matrix.language }}"
+          case "${{ matrix.language }}" in
+            go)
+              echo "Setting up Go environment"
+              # Go setup will be handled by setup-go action below
+              ;;
+            python)
+              echo "Setting up Python environment"
+              # Python setup will be handled by setup-python action below
+              ;;
+            typescript|javascript)
+              echo "Setting up Node.js environment"
+              # Node.js setup will be handled by setup-node action below
+              ;;
+            *)
+              echo "General validation environment"
+              ;;
+          esac
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Setup Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        if: contains('typescript,javascript', matrix.language)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          echo "📦 Installing dependencies for ${{ matrix.language }}"
+          case "${{ matrix.language }}" in
+            go)
+              if [ -f "go.mod" ]; then
+                go mod download
+                go mod tidy
+                echo "✅ Go dependencies installed"
+              fi
+              ;;
+            python)
+              if [ -f "requirements.txt" ]; then
+                pip install -r requirements.txt
+              elif [ -f "pyproject.toml" ]; then
+                pip install -e .
+              fi
+              echo "✅ Python dependencies installed"
+              ;;
+            typescript|javascript)
+              if [ -f "package.json" ]; then
+                npm ci
+                echo "✅ Node.js dependencies installed"
+              fi
+              ;;
+          esac
+
+      - name: QMS Definition of Ready (DoR) Validation
+        env:
+          QMS_MODE: ${{ env.QMS_DOR_VALIDATOR }}
+          PR_NUMBER: ${{ github.event.number }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          COMPLEXITY_SCORE: ${{ needs.detect-changes.outputs.complexity_score }}
+        run: |
+          echo "📋 QMS DoR Validation Phase"
+          echo "Mode: $QMS_MODE"
+          echo "PR: $PR_NUMBER | $HEAD_REF → $BASE_REF"
+          echo "Complexity Score: $COMPLEXITY_SCORE"
+          
+          # DoR Checklist Validation
+          echo "Validating Definition of Ready criteria..."
+          
+          # Check 1: PR has description
+          if [ -z "${{ github.event.pull_request.body }}" ]; then
+            echo "❌ DoR Failure: PR must have a description"
+            exit 1
+          fi
+          
+          # Check 2: Branch naming convention
+          if [[ ! "$HEAD_REF" =~ ^(feature|bugfix|hotfix|chore)/.+ ]]; then
+            echo "⚠️ DoR Warning: Branch should follow naming convention (feature|bugfix|hotfix|chore)/description"
+          fi
+          
+          # Check 3: Tests required for code changes
+          if [[ "${{ needs.detect-changes.outputs.has_tests }}" == "false" && "$COMPLEXITY_SCORE" -gt 3 ]]; then
+            echo "❌ DoR Failure: Complex changes require tests (Complexity: $COMPLEXITY_SCORE)"
+            exit 1
+          fi
+          
+          # Check 4: Documentation updates for significant changes
+          if [[ "${{ needs.detect-changes.outputs.has_docs }}" == "false" && "$COMPLEXITY_SCORE" -gt 5 ]]; then
+            echo "⚠️ DoR Warning: Significant changes should include documentation updates"
+          fi
+          
+          echo "✅ DoR validation completed"
+
+      - name: QMS Coding Standards Validation
+        env:
+          QMS_MODE: ${{ env.QMS_CODING_STANDARDS }}
+          LANGUAGE: ${{ matrix.language }}
+        run: |
+          echo "📐 QMS Coding Standards Phase"
+          echo "Mode: $QMS_MODE"
+          echo "Language: $LANGUAGE"
+          
+          # Language-specific linting and standards
+          case "$LANGUAGE" in
+            go)
+              echo "Running Go coding standards..."
+              if command -v golangci-lint > /dev/null; then
+                golangci-lint run --timeout=10m
+              else
+                echo "⚠️ golangci-lint not installed, using basic checks"
+                go vet ./...
+                go fmt -d ./...
+              fi
+              ;;
+            python)
+              echo "Running Python coding standards..."
+              if command -v flake8 > /dev/null; then
+                flake8 . --max-line-length=88 --ignore=E203,W503
+              fi
+              if command -v black > /dev/null; then
+                black --check --diff .
+              fi
+              if command -v isort > /dev/null; then
+                isort --check-only --diff .
+              fi
+              ;;
+            typescript|javascript)
+              echo "Running TypeScript/JavaScript coding standards..."
+              if [ -f "package.json" ]; then
+                if npm list eslint &>/dev/null; then
+                  npm run lint || npx eslint . --ext .js,.jsx,.ts,.tsx
+                fi
+                if npm list prettier &>/dev/null; then
+                  npm run format:check || npx prettier --check .
+                fi
+              fi
+              ;;
+          esac
+          
+          echo "✅ Coding standards validation completed"
+
+      - name: QMS Code Quality Analysis
+        env:
+          QMS_MODE: ${{ env.QMS_CODE_REVIEWER }}
+          LANGUAGE: ${{ matrix.language }}
+        run: |
+          echo "🔍 QMS Code Quality Analysis Phase"
+          echo "Mode: $QMS_MODE"
+          
+          # Static analysis and complexity checks
+          case "$LANGUAGE" in
+            go)
+              echo "Analyzing Go code quality..."
+              if command -v gocyclo > /dev/null; then
+                echo "Checking cyclomatic complexity..."
+                gocyclo -over 15 .
+              fi
+              
+              if command -v go-critic > /dev/null; then
+                echo "Running go-critic analysis..."
+                go-critic check ./...
+              fi
+              ;;
+            python)
+              echo "Analyzing Python code quality..."
+              if command -v radon > /dev/null; then
+                echo "Checking cyclomatic complexity..."
+                radon cc . --min C
+              fi
+              
+              if command -v bandit > /dev/null; then
+                echo "Running security analysis..."
+                bandit -r . -f json || true
+              fi
+              ;;
+            typescript|javascript)
+              echo "Analyzing TypeScript/JavaScript code quality..."
+              # Additional quality checks can be added here
+              ;;
+          esac
+          
+          echo "✅ Code quality analysis completed"
+
+  pr-compliance-check:
+    name: "📊 QMS Compliance Check"
+    runs-on: ubuntu-latest
+    needs: [detect-changes, pr-validation-checks]
+    if: always() && needs.detect-changes.outputs.has_code == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: QMS Compliance Validation
+        env:
+          QMS_MODE: ${{ env.QMS_COMPLIANCE_COORDINATOR }}
+          PR_NUMBER: ${{ github.event.number }}
+          VALIDATION_STATUS: ${{ needs.pr-validation-checks.result }}
+        run: |
+          echo "⚖️ QMS Compliance Validation Phase"
+          echo "Mode: $QMS_MODE"
+          echo "PR: $PR_NUMBER"
+          echo "Validation Status: $VALIDATION_STATUS"
+          
+          # Check validation results
+          if [ "$VALIDATION_STATUS" = "success" ]; then
+            echo "✅ All QMS validation checks passed"
+            
+            # Generate compliance report
+            echo "📋 Generating QMS compliance report..."
+            cat > qms-pr-compliance-report.md << EOF
+          # QMS Pull Request Compliance Report
+          
+          **PR Number:** #$PR_NUMBER
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Status:** ✅ COMPLIANT
+          
+          ## Validation Results
+          - **Definition of Ready:** ✅ Passed
+          - **Coding Standards:** ✅ Passed  
+          - **Code Quality:** ✅ Passed
+          - **Languages Detected:** ${{ needs.detect-changes.outputs.languages }}
+          - **Complexity Score:** ${{ needs.detect-changes.outputs.complexity_score }}
+          
+          ## QMS Modes Involved
+          - $QMS_DOR_VALIDATOR (Definition of Ready)
+          - $QMS_CODING_STANDARDS (Coding Standards)
+          - $QMS_CODE_REVIEWER (Code Quality)
+          - $QMS_COMPLIANCE_COORDINATOR (Compliance Validation)
+          
+          ## Recommendations
+          - PR is ready for review and merge consideration
+          - All QMS quality gates have been satisfied
+          
+          ---
+          *Generated by QMS Pull Request Validation Pipeline*
+          EOF
+            
+          elif [ "$VALIDATION_STATUS" = "failure" ]; then
+            echo "❌ QMS validation checks failed"
+            echo "PR requires fixes before it can be merged"
+            
+            # Generate failure report
+            cat > qms-pr-compliance-report.md << EOF
+          # QMS Pull Request Compliance Report
+          
+          **PR Number:** #$PR_NUMBER
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Status:** ❌ NON-COMPLIANT
+          
+          ## Validation Results
+          - **Overall Status:** ❌ Failed
+          - **Languages Detected:** ${{ needs.detect-changes.outputs.languages }}
+          - **Complexity Score:** ${{ needs.detect-changes.outputs.complexity_score }}
+          
+          ## Required Actions
+          Please review the validation job logs and address all identified issues:
+          1. Check Definition of Ready (DoR) requirements
+          2. Fix coding standards violations
+          3. Address code quality issues
+          4. Ensure all tests pass
+          
+          ## QMS Contact
+          For assistance with QMS compliance, consult the QMS documentation or contact the quality team.
+          
+          ---
+          *Generated by QMS Pull Request Validation Pipeline*
+          EOF
+            
+            exit 1
+          else
+            echo "⚠️ QMS validation had mixed results"
+            echo "Manual review may be required"
+          fi
+
+      - name: Upload Compliance Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: qms-pr-compliance-report
+          path: qms-pr-compliance-report.md
+          retention-days: 30
+
+  pr-emergency-bypass:
+    name: "🚨 Emergency Bypass Check"
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'qms-emergency-bypass')
+    steps:
+      - name: Emergency Bypass Validation
+        env:
+          QMS_MODE: ${{ env.QMS_QUALITY_COORDINATOR }}
+        run: |
+          echo "🚨 QMS Emergency Bypass Activated"
+          echo "Mode: $QMS_MODE"
+          echo "PR: ${{ github.event.number }}"
+          
+          # Log emergency bypass usage
+          echo "Emergency bypass requested for PR #${{ github.event.number }}"
+          echo "Requester: ${{ github.actor }}"
+          echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "Base: ${{ github.base_ref }} | Head: ${{ github.head_ref }}"
+          
+          # Validate bypass authority
+          AUTHORIZED_USERS="admin,emergency-user,quality-lead"
+          if [[ ",$AUTHORIZED_USERS," == *",${{ github.actor }},"* ]] || [[ "${{ github.actor }}" == *"admin"* ]]; then
+            echo "✅ Emergency bypass authorized for user: ${{ github.actor }}"
+            echo "⚠️ WARNING: QMS quality gates bypassed - manual review required"
+          else
+            echo "❌ Unauthorized emergency bypass attempt by: ${{ github.actor }}"
+            echo "Emergency bypass can only be used by authorized personnel"
+            exit 1
+          fi
+          
+          # Create bypass audit log
+          cat > emergency-bypass-audit.md << EOF
+          # QMS Emergency Bypass Audit Log
+          
+          **PR Number:** #${{ github.event.number }}
+          **Authorized By:** ${{ github.actor }}
+          **Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Branch:** ${{ github.head_ref }} → ${{ github.base_ref }}
+          
+          **Justification:** Emergency bypass label applied
+          
+          **Post-Bypass Actions Required:**
+          - [ ] Manual code review by senior developer
+          - [ ] Quality assessment by QMS team
+          - [ ] Documentation of bypass reason
+          - [ ] Follow-up quality improvements if needed
+          
+          ---
+          *QMS Emergency Bypass System*
+          EOF
+
+      - name: Upload Bypass Audit
+        uses: actions/upload-artifact@v3
+        with:
+          name: emergency-bypass-audit
+          path: emergency-bypass-audit.md
+          retention-days: 90
+
+  # Final status check
+  pr-validation-status:
+    name: "📋 QMS PR Validation Status"
+    runs-on: ubuntu-latest
+    needs: [detect-changes, pr-validation-checks, pr-compliance-check]
+    if: always()
+    steps:
+      - name: Final Status Report
+        env:
+          CHANGES_STATUS: ${{ needs.detect-changes.result }}
+          VALIDATION_STATUS: ${{ needs.pr-validation-checks.result }}
+          COMPLIANCE_STATUS: ${{ needs.pr-compliance-check.result }}
+        run: |
+          echo "📊 QMS Pull Request Validation Summary"
+          echo "========================================"
+          echo "PR: #${{ github.event.number }}"
+          echo "Branch: ${{ github.head_ref }} → ${{ github.base_ref }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Event: ${{ github.event_name }}"
+          echo ""
+          echo "Status Results:"
+          echo "- Change Detection: $CHANGES_STATUS"
+          echo "- Validation Checks: $VALIDATION_STATUS"  
+          echo "- Compliance Check: $COMPLIANCE_STATUS"
+          echo ""
+          
+          # Determine overall status
+          if [[ "$VALIDATION_STATUS" == "success" && "$COMPLIANCE_STATUS" == "success" ]]; then
+            echo "✅ QMS PR Validation: PASSED"
+            echo "PR is compliant with QMS standards and ready for review"
+          elif [[ "$VALIDATION_STATUS" == "skipped" && "${{ needs.detect-changes.outputs.has_code }}" == "false" ]]; then
+            echo "ℹ️ QMS PR Validation: SKIPPED (No code changes detected)"
+          else
+            echo "❌ QMS PR Validation: FAILED"
+            echo "PR requires fixes to meet QMS compliance standards"
+            exit 1
+          fi

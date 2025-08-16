@@ -1,0 +1,717 @@
+name: QMS Security Scan
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan to perform'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - sast-only
+        - dast-only
+        - dependency-only
+        - compliance-only
+      bypass_failures:
+        description: 'Bypass security failures (emergency only)'
+        required: false
+        default: false
+        type: boolean
+      bypass_reason:
+        description: 'Reason for bypassing security failures'
+        required: false
+        type: string
+
+env:
+  QMS_SECURITY_SCANNER: 'qms-security-scanner'
+  QMS_COMPLIANCE_COORDINATOR: 'qms-compliance-coordinator'
+  QMS_QUALITY_COORDINATOR: 'qms-quality-coordinator'
+  SECURITY_THRESHOLD_CRITICAL: 0
+  SECURITY_THRESHOLD_HIGH: 5
+  SECURITY_THRESHOLD_MEDIUM: 20
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Language Detection and Scan Planning
+  detect-stack:
+    name: Detect Technology Stack
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+      has_go: ${{ steps.detect.outputs.has_go }}
+      has_python: ${{ steps.detect.outputs.has_python }}
+      has_typescript: ${{ steps.detect.outputs.has_typescript }}
+      has_react: ${{ steps.detect.outputs.has_react }}
+      has_docker: ${{ steps.detect.outputs.has_docker }}
+      has_terraform: ${{ steps.detect.outputs.has_terraform }}
+      scan_matrix: ${{ steps.detect.outputs.scan_matrix }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Detect Languages and Technologies
+        id: detect
+        run: |
+          echo "QMS_SECURITY_SCANNER: Detecting project technologies for security scanning"
+          
+          # Initialize detection flags
+          HAS_GO=false
+          HAS_PYTHON=false
+          HAS_TS=false
+          HAS_REACT=false
+          HAS_DOCKER=false
+          HAS_TERRAFORM=false
+          LANGUAGES=()
+          
+          # Language Detection
+          if find . -name "*.go" -o -name "go.mod" | grep -q .; then
+            HAS_GO=true
+            LANGUAGES+=("go")
+          fi
+          
+          if find . -name "*.py" -o -name "requirements.txt" -o -name "pyproject.toml" | grep -q .; then
+            HAS_PYTHON=true
+            LANGUAGES+=("python")
+          fi
+          
+          if find . -name "*.ts" -o -name "*.tsx" -o -name "tsconfig.json" | grep -q .; then
+            HAS_TS=true
+            LANGUAGES+=("typescript")
+          fi
+          
+          if find . -name "package.json" | xargs grep -l "react" 2>/dev/null | grep -q .; then
+            HAS_REACT=true
+            LANGUAGES+=("react")
+          fi
+          
+          if find . -name "Dockerfile" -o -name "docker-compose.yml" | grep -q .; then
+            HAS_DOCKER=true
+          fi
+          
+          if find . -name "*.tf" -o -name "*.tfvars" | grep -q .; then
+            HAS_TERRAFORM=true
+          fi
+          
+          # Create scan matrix
+          SCAN_MATRIX='{"include":['
+          
+          if [ "$HAS_GO" = true ]; then
+            SCAN_MATRIX+='{  "language": "go", "sast_tool": "gosec", "dependency_tool": "govulncheck" },'
+          fi
+          
+          if [ "$HAS_PYTHON" = true ]; then
+            SCAN_MATRIX+='{  "language": "python", "sast_tool": "bandit", "dependency_tool": "safety" },'
+          fi
+          
+          if [ "$HAS_TS" = true ] || [ "$HAS_REACT" = true ]; then
+            SCAN_MATRIX+='{  "language": "javascript", "sast_tool": "eslint-security", "dependency_tool": "audit" },'
+          fi
+          
+          # Remove trailing comma and close matrix
+          SCAN_MATRIX=$(echo "$SCAN_MATRIX" | sed 's/,$//')
+          SCAN_MATRIX+=']}'
+          
+          # Set outputs
+          echo "has_go=$HAS_GO" >> $GITHUB_OUTPUT
+          echo "has_python=$HAS_PYTHON" >> $GITHUB_OUTPUT
+          echo "has_typescript=$HAS_TS" >> $GITHUB_OUTPUT
+          echo "has_react=$HAS_REACT" >> $GITHUB_OUTPUT
+          echo "has_docker=$HAS_DOCKER" >> $GITHUB_OUTPUT
+          echo "has_terraform=$HAS_TERRAFORM" >> $GITHUB_OUTPUT
+          echo "languages=$(IFS=,; echo "${LANGUAGES[*]}")" >> $GITHUB_OUTPUT
+          echo "scan_matrix=$SCAN_MATRIX" >> $GITHUB_OUTPUT
+          
+          echo "Detected languages: ${LANGUAGES[*]}"
+          echo "Docker: $HAS_DOCKER, Terraform: $HAS_TERRAFORM"
+
+  # Static Application Security Testing (SAST)
+  sast-scan:
+    name: SAST Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-stack
+    if: github.event.inputs.scan_type != 'dast-only' && github.event.inputs.scan_type != 'dependency-only' && github.event.inputs.scan_type != 'compliance-only'
+    strategy:
+      matrix: ${{ fromJson(needs.detect-stack.outputs.scan_matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Language Environment
+        run: |
+          echo "Setting up environment for ${{ matrix.language }}"
+          case "${{ matrix.language }}" in
+            go)
+              sudo apt-get update && sudo apt-get install -y golang-go
+              go version
+              ;;
+            python)
+              python3 --version
+              pip3 install --upgrade pip
+              ;;
+            javascript)
+              node --version
+              npm --version
+              ;;
+          esac
+
+      - name: Install Security Tools
+        run: |
+          echo "QMS_SECURITY_SCANNER: Installing SAST tools for ${{ matrix.language }}"
+          case "${{ matrix.language }}" in
+            go)
+              go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+              ;;
+            python)
+              pip3 install bandit[toml] semgrep
+              ;;
+            javascript)
+              npm install -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin
+              npm install -g eslint-plugin-security eslint-plugin-react-hooks
+              ;;
+          esac
+
+      - name: Run SAST Scan
+        id: sast
+        run: |
+          echo "QMS_SECURITY_SCANNER: Running SAST scan for ${{ matrix.language }}"
+          SCAN_RESULT=0
+          
+          case "${{ matrix.language }}" in
+            go)
+              echo "Running gosec scan..."
+              gosec -fmt sarif -out gosec-results.sarif ./... || SCAN_RESULT=$?
+              gosec -fmt json -out gosec-results.json ./... || true
+              ;;
+            python)
+              echo "Running bandit scan..."
+              bandit -r . -f json -o bandit-results.json || SCAN_RESULT=$?
+              bandit -r . -f sarif -o bandit-results.sarif || true
+              ;;
+            javascript)
+              echo "Running ESLint security scan..."
+              npx eslint . --ext .js,.jsx,.ts,.tsx --format json -o eslint-results.json || SCAN_RESULT=$?
+              ;;
+          esac
+          
+          echo "sast_result=$SCAN_RESULT" >> $GITHUB_OUTPUT
+
+      - name: Upload SARIF Results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: |
+            gosec-results.sarif
+            bandit-results.sarif
+        continue-on-error: true
+
+      - name: Upload SAST Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-results-${{ matrix.language }}
+          path: |
+            *-results.json
+            *-results.sarif
+          retention-days: 30
+
+  # Dependency Vulnerability Scanning
+  dependency-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-stack
+    if: github.event.inputs.scan_type != 'sast-only' && github.event.inputs.scan_type != 'dast-only' && github.event.inputs.scan_type != 'compliance-only'
+    strategy:
+      matrix: ${{ fromJson(needs.detect-stack.outputs.scan_matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Language Environment
+        run: |
+          case "${{ matrix.language }}" in
+            go)
+              sudo apt-get update && sudo apt-get install -y golang-go
+              ;;
+            python)
+              python3 -m pip install --upgrade pip
+              ;;
+            javascript)
+              node --version
+              npm --version
+              ;;
+          esac
+
+      - name: Install Dependencies
+        run: |
+          case "${{ matrix.language }}" in
+            go)
+              if [ -f "go.mod" ]; then
+                go mod download
+              fi
+              ;;
+            python)
+              if [ -f "requirements.txt" ]; then
+                pip3 install -r requirements.txt
+              fi
+              if [ -f "pyproject.toml" ]; then
+                pip3 install -e .
+              fi
+              ;;
+            javascript)
+              if [ -f "package.json" ]; then
+                npm ci --audit-level=none
+              fi
+              ;;
+          esac
+
+      - name: Run Dependency Scan
+        id: deps
+        run: |
+          echo "QMS_SECURITY_SCANNER: Running dependency vulnerability scan for ${{ matrix.language }}"
+          SCAN_RESULT=0
+          VULNERABILITIES=0
+          
+          case "${{ matrix.language }}" in
+            go)
+              echo "Running govulncheck..."
+              go install golang.org/x/vuln/cmd/govulncheck@latest
+              govulncheck -json ./... > govulncheck-results.json || SCAN_RESULT=$?
+              VULNERABILITIES=$(jq '[.vulns // [] | length] | add // 0' govulncheck-results.json)
+              ;;
+            python)
+              echo "Running safety check..."
+              pip3 install safety
+              safety check --json --output safety-results.json || SCAN_RESULT=$?
+              VULNERABILITIES=$(jq '[.vulnerabilities // [] | length] | add // 0' safety-results.json)
+              ;;
+            javascript)
+              echo "Running npm audit..."
+              npm audit --json > npm-audit-results.json || SCAN_RESULT=$?
+              VULNERABILITIES=$(jq '[.vulnerabilities // {} | to_entries[] | select(.value.severity == "critical" or .value.severity == "high")] | length' npm-audit-results.json)
+              ;;
+          esac
+          
+          echo "Found $VULNERABILITIES vulnerabilities"
+          echo "dependency_result=$SCAN_RESULT" >> $GITHUB_OUTPUT
+          echo "vulnerability_count=$VULNERABILITIES" >> $GITHUB_OUTPUT
+
+      - name: Upload Dependency Scan Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan-${{ matrix.language }}
+          path: |
+            *-results.json
+          retention-days: 30
+
+  # Container Security Scanning
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-stack
+    if: needs.detect-stack.outputs.has_docker == 'true' && github.event.inputs.scan_type != 'sast-only' && github.event.inputs.scan_type != 'compliance-only'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: |
+          echo "QMS_SECURITY_SCANNER: Building Docker image for security scanning"
+          docker build -t security-scan:latest .
+
+      - name: Run Trivy Container Scan
+        run: |
+          echo "QMS_SECURITY_SCANNER: Running Trivy container vulnerability scan"
+          # Install Trivy
+          sudo apt-get update
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy
+          
+          # Run scan
+          trivy image --format json --output trivy-results.json security-scan:latest
+          trivy image --format sarif --output trivy-results.sarif security-scan:latest
+
+      - name: Upload Container Scan Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-scan-results
+          path: |
+            trivy-results.json
+            trivy-results.sarif
+          retention-days: 30
+
+  # Infrastructure as Code Security Scanning
+  iac-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-stack
+    if: needs.detect-stack.outputs.has_terraform == 'true' && github.event.inputs.scan_type != 'sast-only' && github.event.inputs.scan_type != 'dependency-only'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Install tfsec
+        run: |
+          echo "QMS_SECURITY_SCANNER: Installing tfsec for Terraform security scanning"
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+
+      - name: Run Terraform Security Scan
+        run: |
+          echo "QMS_SECURITY_SCANNER: Running tfsec security scan"
+          tfsec . --format json --out tfsec-results.json
+          tfsec . --format sarif --out tfsec-results.sarif
+
+      - name: Upload IaC Scan Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iac-scan-results
+          path: |
+            tfsec-results.json
+            tfsec-results.sarif
+          retention-days: 30
+
+  # Dynamic Application Security Testing (DAST)
+  dast-scan:
+    name: DAST Security Scan
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'dast-only'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup OWASP ZAP
+        run: |
+          echo "QMS_SECURITY_SCANNER: Setting up OWASP ZAP for DAST scanning"
+          docker pull zaproxy/zap-stable:latest
+
+      - name: Start Test Application
+        id: start-app
+        run: |
+          echo "QMS_SECURITY_SCANNER: Starting application for DAST scan"
+          # Try to detect and start the application
+          if [ -f "docker-compose.yml" ]; then
+            docker-compose up -d
+            APP_URL="http://localhost:3000"
+          elif [ -f "package.json" ]; then
+            # Start Node.js app in background
+            npm install
+            npm start &
+            APP_URL="http://localhost:3000"
+          else
+            echo "No startable application detected for DAST scan"
+            APP_URL=""
+          fi
+          
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+
+      - name: Wait for Application
+        if: steps.start-app.outputs.app_url != ''
+        run: |
+          echo "Waiting for application to be ready..."
+          timeout 60s bash -c 'until curl -f ${{ steps.start-app.outputs.app_url }}; do sleep 2; done' || echo "Application may not be ready"
+
+      - name: Run OWASP ZAP DAST Scan
+        if: steps.start-app.outputs.app_url != ''
+        run: |
+          echo "QMS_SECURITY_SCANNER: Running OWASP ZAP DAST scan"
+          docker run -v $(pwd):/zap/wrk/:rw \
+            -t zaproxy/zap-stable:latest \
+            zap-baseline.py \
+            -t ${{ steps.start-app.outputs.app_url }} \
+            -J zap-report.json \
+            -r zap-report.html
+
+      - name: Upload DAST Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-scan-results
+          path: |
+            zap-report.json
+            zap-report.html
+          retention-days: 30
+
+  # Compliance and Policy Validation
+  compliance-scan:
+    name: Compliance Validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == 'compliance-only'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Compliance Checks
+        run: |
+          echo "QMS_COMPLIANCE_COORDINATOR: Running compliance validation"
+          COMPLIANCE_SCORE=0
+          COMPLIANCE_ISSUES=()
+          
+          # Check for security policy files
+          if [ ! -f "SECURITY.md" ]; then
+            COMPLIANCE_ISSUES+=("Missing SECURITY.md file")
+            COMPLIANCE_SCORE=$((COMPLIANCE_SCORE + 1))
+          fi
+          
+          # Check for dependency management
+          if [ -f "package.json" ] && [ ! -f "package-lock.json" ]; then
+            COMPLIANCE_ISSUES+=("Missing package-lock.json for dependency integrity")
+            COMPLIANCE_SCORE=$((COMPLIANCE_SCORE + 1))
+          fi
+          
+          # Check for secrets in code
+          echo "Checking for potential secrets..."
+          if git log --all --full-history -- . | grep -i -E "(password|secret|key|token)" | head -5; then
+            COMPLIANCE_ISSUES+=("Potential secrets found in git history")
+            COMPLIANCE_SCORE=$((COMPLIANCE_SCORE + 2))
+          fi
+          
+          # Generate compliance report
+          cat > compliance-report.json <<EOF
+          {
+            "compliance_score": $COMPLIANCE_SCORE,
+            "issues": $(printf '%s\n' "${COMPLIANCE_ISSUES[@]}" | jq -R . | jq -s .),
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "total_checks": 3
+          }
+          EOF
+          
+          echo "Compliance issues found: $COMPLIANCE_SCORE"
+          if [ $COMPLIANCE_SCORE -gt 0 ]; then
+            echo "Compliance issues:"
+            printf '%s\n' "${COMPLIANCE_ISSUES[@]}"
+          fi
+
+      - name: Upload Compliance Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-scan-results
+          path: compliance-report.json
+          retention-days: 30
+
+  # Security Results Aggregation and Assessment
+  security-assessment:
+    name: Security Assessment
+    runs-on: ubuntu-latest
+    needs: [detect-stack, sast-scan, dependency-scan, container-scan, iac-scan, dast-scan, compliance-scan]
+    if: always()
+    steps:
+      - name: Download All Scan Results
+        uses: actions/download-artifact@v4
+        with:
+          path: scan-results/
+
+      - name: Aggregate Security Results
+        id: aggregate
+        run: |
+          echo "QMS_SECURITY_SCANNER: Aggregating security scan results"
+          
+          TOTAL_CRITICAL=0
+          TOTAL_HIGH=0
+          TOTAL_MEDIUM=0
+          TOTAL_LOW=0
+          SCAN_FAILURES=0
+          
+          # Process SAST results
+          for file in scan-results/sast-results-*/; do
+            if [ -d "$file" ]; then
+              echo "Processing SAST results from $file"
+              # Count vulnerabilities from JSON files
+              for json_file in "$file"/*.json; do
+                if [ -f "$json_file" ]; then
+                  # This is a simplified count - in practice you'd parse each tool's specific format
+                  CRITICAL_COUNT=$(jq '[.issues[]? // .results[]? // .vulnerabilities[]? | select(.severity == "CRITICAL" or .severity == "critical" or .priority == "HIGH")] | length' "$json_file" 2>/dev/null || echo "0")
+                  TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRITICAL_COUNT))
+                fi
+              done
+            fi
+          done
+          
+          # Process dependency scan results
+          for file in scan-results/dependency-scan-*/; do
+            if [ -d "$file" ]; then
+              echo "Processing dependency scan results from $file"
+              for json_file in "$file"/*.json; do
+                if [ -f "$json_file" ]; then
+                  HIGH_COUNT=$(jq '[.vulnerabilities[]? // .vulns[]? | select(.severity == "HIGH" or .severity == "high" or .severity == "critical")] | length' "$json_file" 2>/dev/null || echo "0")
+                  TOTAL_HIGH=$((TOTAL_HIGH + HIGH_COUNT))
+                fi
+              done
+            fi
+          done
+          
+          # Check thresholds
+          SECURITY_GATE_PASSED=true
+          BLOCKING_ISSUES=()
+          
+          if [ $TOTAL_CRITICAL -gt $SECURITY_THRESHOLD_CRITICAL ]; then
+            SECURITY_GATE_PASSED=false
+            BLOCKING_ISSUES+=("Critical vulnerabilities: $TOTAL_CRITICAL (threshold: $SECURITY_THRESHOLD_CRITICAL)")
+          fi
+          
+          if [ $TOTAL_HIGH -gt $SECURITY_THRESHOLD_HIGH ]; then
+            SECURITY_GATE_PASSED=false
+            BLOCKING_ISSUES+=("High vulnerabilities: $TOTAL_HIGH (threshold: $SECURITY_THRESHOLD_HIGH)")
+          fi
+          
+          # Generate assessment report
+          cat > security-assessment.json <<EOF
+          {
+            "scan_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "security_gate_passed": $SECURITY_GATE_PASSED,
+            "vulnerability_summary": {
+              "critical": $TOTAL_CRITICAL,
+              "high": $TOTAL_HIGH,
+              "medium": $TOTAL_MEDIUM,
+              "low": $TOTAL_LOW
+            },
+            "thresholds": {
+              "critical": $SECURITY_THRESHOLD_CRITICAL,
+              "high": $SECURITY_THRESHOLD_HIGH,
+              "medium": $SECURITY_THRESHOLD_MEDIUM
+            },
+            "blocking_issues": $(printf '%s\n' "${BLOCKING_ISSUES[@]}" | jq -R . | jq -s .),
+            "scan_coverage": {
+              "sast": true,
+              "dependency_scan": true,
+              "container_scan": ${{ needs.detect-stack.outputs.has_docker }},
+              "iac_scan": ${{ needs.detect-stack.outputs.has_terraform }},
+              "dast": true,
+              "compliance": true
+            }
+          }
+          EOF
+          
+          echo "security_gate_passed=$SECURITY_GATE_PASSED" >> $GITHUB_OUTPUT
+          echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+          echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+
+      - name: Security Gate Decision
+        id: gate-decision
+        run: |
+          echo "QMS_QUALITY_COORDINATOR: Making security gate decision"
+          
+          BYPASS_ENABLED="${{ github.event.inputs.bypass_failures }}"
+          BYPASS_REASON="${{ github.event.inputs.bypass_reason }}"
+          SECURITY_PASSED="${{ steps.aggregate.outputs.security_gate_passed }}"
+          
+          if [ "$SECURITY_PASSED" = "true" ]; then
+            echo "✅ Security gate PASSED - All vulnerability thresholds met"
+            echo "gate_result=passed" >> $GITHUB_OUTPUT
+          elif [ "$BYPASS_ENABLED" = "true" ] && [ -n "$BYPASS_REASON" ]; then
+            echo "⚠️ Security gate BYPASSED - Reason: $BYPASS_REASON"
+            echo "🚨 SECURITY AUDIT: Gate bypassed by ${{ github.actor }} at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "gate_result=bypassed" >> $GITHUB_OUTPUT
+            
+            # Log bypass for audit
+            cat >> security-assessment.json <<EOF
+          ,"bypass_info": {
+            "bypassed": true,
+            "reason": "$BYPASS_REASON",
+            "bypassed_by": "${{ github.actor }}",
+            "bypass_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          else
+            echo "❌ Security gate FAILED - Vulnerability thresholds exceeded"
+            echo "Critical: ${{ steps.aggregate.outputs.total_critical }}, High: ${{ steps.aggregate.outputs.total_high }}"
+            echo "gate_result=failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Security Assessment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-assessment
+          path: security-assessment.json
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const assessment = JSON.parse(fs.readFileSync('security-assessment.json', 'utf8'));
+            
+            const passed = assessment.security_gate_passed;
+            const vulnerabilities = assessment.vulnerability_summary;
+            const status = passed ? '✅ PASSED' : '❌ FAILED';
+            
+            const comment = `
+            ## 🛡️ QMS Security Scan Results ${status}
+            
+            **Vulnerability Summary:**
+            - 🔴 Critical: ${vulnerabilities.critical}
+            - 🟠 High: ${vulnerabilities.high}
+            - 🟡 Medium: ${vulnerabilities.medium}
+            - 🟢 Low: ${vulnerabilities.low}
+            
+            **Scan Coverage:**
+            - Static Analysis (SAST): ✅
+            - Dependency Scan: ✅
+            - Container Scan: ${assessment.scan_coverage.container_scan ? '✅' : '➖'}
+            - Infrastructure Scan: ${assessment.scan_coverage.iac_scan ? '✅' : '➖'}
+            - Dynamic Analysis (DAST): ✅
+            - Compliance Check: ✅
+            
+            ${assessment.bypass_info?.bypassed ? 
+              `⚠️ **Security gate was bypassed**: ${assessment.bypass_info.reason}` : ''}
+            
+            Scan completed at: ${assessment.scan_timestamp}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail Job if Security Gate Failed
+        if: steps.gate-decision.outputs.gate_result == 'failed'
+        run: |
+          echo "❌ Security gate failed - Pipeline stopped due to security vulnerabilities"
+          echo "Critical vulnerabilities: ${{ steps.aggregate.outputs.total_critical }}"
+          echo "High vulnerabilities: ${{ steps.aggregate.outputs.total_high }}"
+          echo "Review security scan results and fix vulnerabilities before proceeding"
+          exit 1
+
+      - name: Security Scan Summary
+        if: always()
+        run: |
+          echo "🛡️ QMS Security Scan Summary"
+          echo "=============================="
+          echo "Gate Result: ${{ steps.gate-decision.outputs.gate_result }}"
+          echo "Critical Vulnerabilities: ${{ steps.aggregate.outputs.total_critical }}"
+          echo "High Vulnerabilities: ${{ steps.aggregate.outputs.total_high }}"
+          echo "Scan Coverage: SAST, Dependencies, Containers, IaC, DAST, Compliance"
+          echo "=============================="

@@ -72,6 +72,14 @@ Templates are organized into subdirectories within `.ruru/templates/`:
 *   **`42_session_deferred.md`**: For capturing tasks, ideas, or other items deferred for later action. Typically stored in `.ruru/sessions/[SessionID]/artifacts/deferred/`.
 *   **`50_session_summary.md`**: For generating structured summaries of user interaction sessions. Typically stored in `.ruru/sessions/[SessionID]/summaries/`. See `50_session_summary.README.md` for schema.
 
+#### QMS CI/CD Automation Templates
+
+*   **`27_qms_cicd_pipeline.md`**: For defining and managing QMS-compliant CI/CD pipeline configurations with automated quality gates, GitHub Actions integration, and comprehensive monitoring. Typically stored in `.ruru/qms/pipelines/`. See `27_qms_cicd_pipeline.README.md` for schema and usage details.
+*   **`28_qms_deployment_approval.md`**: For tracking deployment approval workflows with multi-stakeholder approvals, risk assessment, and rollback procedures within the QMS framework. Typically stored in `.ruru/qms/deployments/`. See `28_qms_deployment_approval.README.md` for schema and usage details.
+*   **`29_qms_test_execution_report.md`**: For comprehensive automated test execution reporting with coverage metrics, quality validation, security testing, and performance analysis. Typically stored in `.ruru/qms/testing/`. See `29_qms_test_execution_report.README.md` for schema and usage details.
+*   **`30_qms_quality_gate_result.md`**: For tracking quality gate pass/fail results with detailed criteria evaluation, remediation workflows, and stakeholder management. Typically stored in `.ruru/qms/quality-gates/`. See `30_qms_quality_gate_result.README.md` for schema and usage details.
+*   **`31_qms_pipeline_failure_analysis.md`**: For systematic investigation and documentation of CI/CD pipeline failures with root cause analysis, remediation planning, and lessons learned. Typically stored in `.ruru/qms/failures/`. See `31_qms_pipeline_failure_analysis.README.md` for schema and usage details.
+
 ### Workflow Templates (`.ruru/templates/workflows/`)
 
 *   **`00_workflow_boilerplate.md`**: A comprehensive boilerplate for defining complex, multi-agent workflows or detailed SOPs, including preconditions, postconditions, step-specific error handling, and validation tracking. Use this for documents intended for the `.ruru/workflows/` directory or complex processes in `.ruru/processes/`.

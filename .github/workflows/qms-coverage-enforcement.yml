@@ -1,0 +1,534 @@
+name: QMS Coverage Enforcement
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      bypass_coverage:
+        description: 'Bypass coverage requirements (emergency only)'
+        required: false
+        default: false
+        type: boolean
+      bypass_reason:
+        description: 'Reason for bypassing coverage requirements'
+        required: false
+        type: string
+      force_full_coverage:
+        description: 'Force full project coverage analysis'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  QMS_TESTING_SPECIALIST: 'qms-testing-specialist'
+  QMS_QUALITY_COORDINATOR: 'qms-quality-coordinator'
+  QMS_CICD_ENFORCER: 'qms-cicd-enforcer'
+  # QMS Coverage Thresholds
+  COVERAGE_THRESHOLD_TOTAL: 80
+  COVERAGE_THRESHOLD_CRITICAL: 95
+  COVERAGE_THRESHOLD_HIGH_RISK: 90
+  COVERAGE_THRESHOLD_NEW_CODE: 85
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  issues: write
+  checks: write
+
+jobs:
+  # Language and Framework Detection
+  detect-test-stack:
+    name: Detect Testing Stack
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+      test_frameworks: ${{ steps.detect.outputs.test_frameworks }}
+      has_go: ${{ steps.detect.outputs.has_go }}
+      has_python: ${{ steps.detect.outputs.has_python }}
+      has_typescript: ${{ steps.detect.outputs.has_typescript }}
+      has_react: ${{ steps.detect.outputs.has_react }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Detect Languages and Test Frameworks
+        id: detect
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Detecting project languages and test frameworks"
+          
+          # Initialize detection flags
+          HAS_GO=false
+          HAS_PYTHON=false
+          HAS_TS=false
+          HAS_REACT=false
+          LANGUAGES=()
+          FRAMEWORKS=()
+          
+          # Go Detection
+          if find . -name "*.go" -o -name "go.mod" | grep -q .; then
+            HAS_GO=true
+            LANGUAGES+=("go")
+            FRAMEWORKS+=("go-testing")
+          fi
+          
+          # Python Detection
+          if find . -name "*.py" -o -name "requirements.txt" -o -name "pyproject.toml" | grep -q .; then
+            HAS_PYTHON=true
+            LANGUAGES+=("python")
+            if find . -name "pytest.ini" -o -name "pyproject.toml" | grep -q .; then
+              FRAMEWORKS+=("pytest")
+            else
+              FRAMEWORKS+=("unittest")
+            fi
+          fi
+          
+          # TypeScript Detection
+          if find . -name "*.ts" -o -name "*.tsx" -o -name "tsconfig.json" | grep -q .; then
+            HAS_TS=true
+            LANGUAGES+=("typescript")
+            FRAMEWORKS+=("jest")
+          fi
+          
+          # React Detection
+          if find . -name "package.json" | xargs grep -l "react" 2>/dev/null | grep -q .; then
+            HAS_REACT=true
+            LANGUAGES+=("react")
+            FRAMEWORKS+=("jest")
+          fi
+          
+          # Output results
+          echo "has_go=$HAS_GO" >> $GITHUB_OUTPUT
+          echo "has_python=$HAS_PYTHON" >> $GITHUB_OUTPUT
+          echo "has_typescript=$HAS_TS" >> $GITHUB_OUTPUT
+          echo "has_react=$HAS_REACT" >> $GITHUB_OUTPUT
+          echo "languages=$(IFS=,; echo "${LANGUAGES[*]}")" >> $GITHUB_OUTPUT
+          echo "test_frameworks=$(IFS=,; echo "${FRAMEWORKS[*]}")" >> $GITHUB_OUTPUT
+          
+          echo "Detected languages: ${LANGUAGES[*]}"
+          echo "Detected frameworks: ${FRAMEWORKS[*]}"
+
+  # Go Coverage Testing
+  test-go-coverage:
+    name: Go Coverage Tests
+    needs: detect-test-stack
+    if: needs.detect-test-stack.outputs.has_go == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      coverage_percentage: ${{ steps.coverage.outputs.percentage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Installing Go dependencies"
+          go mod download
+          go mod verify
+
+      - name: Run Go Tests with Coverage
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Running Go tests with coverage analysis"
+          mkdir -p coverage-results
+          go test -v -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -html=coverage.out -o coverage-results/coverage.html
+
+      - name: Extract Coverage Percentage
+        id: coverage
+        run: |
+          if [ -f coverage.out ]; then
+            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+            echo "percentage=${COVERAGE:-0}" >> $GITHUB_OUTPUT
+            echo "Go coverage: ${COVERAGE:-0}%"
+          else
+            echo "percentage=0" >> $GITHUB_OUTPUT
+            echo "Go coverage: 0% (no coverage file found)"
+          fi
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage-results
+          path: coverage-results/
+          retention-days: 30
+
+  # Python Coverage Testing
+  test-python-coverage:
+    name: Python Coverage Tests
+    needs: detect-test-stack
+    if: needs.detect-test-stack.outputs.has_python == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      coverage_percentage: ${{ steps.coverage.outputs.percentage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Installing Python dependencies"
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e .; fi
+          pip install pytest pytest-cov coverage
+
+      - name: Run Python Tests with Coverage
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Running Python tests with coverage analysis"
+          mkdir -p coverage-results
+          
+          if command -v pytest &> /dev/null; then
+            pytest --cov=. --cov-report=xml:coverage-results/coverage.xml --cov-report=html:coverage-results/htmlcov --cov-report=term
+          else
+            coverage run -m unittest discover
+            coverage xml -o coverage-results/coverage.xml
+            coverage html -d coverage-results/htmlcov
+            coverage report
+          fi
+
+      - name: Extract Coverage Percentage
+        id: coverage
+        run: |
+          if [ -f coverage-results/coverage.xml ]; then
+            COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage-results/coverage.xml'); print(int(float(tree.getroot().get('line-rate', '0')) * 100))" 2>/dev/null || echo "0")
+            echo "percentage=${COVERAGE:-0}" >> $GITHUB_OUTPUT
+            echo "Python coverage: ${COVERAGE:-0}%"
+          else
+            echo "percentage=0" >> $GITHUB_OUTPUT
+            echo "Python coverage: 0% (no coverage file found)"
+          fi
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-results
+          path: coverage-results/
+          retention-days: 30
+
+  # TypeScript/React Coverage Testing
+  test-js-coverage:
+    name: JavaScript/TypeScript Coverage Tests
+    needs: detect-test-stack
+    if: needs.detect-test-stack.outputs.has_typescript == 'true' || needs.detect-test-stack.outputs.has_react == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      coverage_percentage: ${{ steps.coverage.outputs.percentage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Installing Node.js dependencies"
+          npm ci
+
+      - name: Run JavaScript/TypeScript Tests with Coverage
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Running JS/TS tests with coverage analysis"
+          mkdir -p coverage-results
+          npm test -- --coverage --coverageDirectory=coverage-results --watchAll=false || true
+
+      - name: Extract Coverage Percentage
+        id: coverage
+        run: |
+          if [ -f coverage-results/coverage-summary.json ]; then
+            COVERAGE=$(node -e "try { console.log(require('./coverage-results/coverage-summary.json').total.lines.pct || 0); } catch(e) { console.log(0); }" 2>/dev/null || echo "0")
+            echo "percentage=${COVERAGE:-0}" >> $GITHUB_OUTPUT
+            echo "JavaScript/TypeScript coverage: ${COVERAGE:-0}%"
+          else
+            echo "percentage=0" >> $GITHUB_OUTPUT
+            echo "JavaScript/TypeScript coverage: 0% (no coverage file found)"
+          fi
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-coverage-results
+          path: coverage-results/
+          retention-days: 30
+
+  # Aggregate Coverage Analysis
+  analyze-coverage:
+    name: Analyze Coverage Results
+    needs: [detect-test-stack, test-go-coverage, test-python-coverage, test-js-coverage]
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      overall_coverage: ${{ steps.aggregate.outputs.overall_coverage }}
+      coverage_passed: ${{ steps.validate.outputs.coverage_passed }}
+      bypass_used: ${{ steps.validate.outputs.bypass_used }}
+      risk_level: ${{ steps.thresholds.outputs.risk_level }}
+      threshold_required: ${{ steps.thresholds.outputs.threshold_total }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Aggregate Coverage Results
+        id: aggregate
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Aggregating coverage results across languages"
+          
+          TOTAL_COVERAGE=0
+          COVERAGE_COUNT=0
+          LANGUAGES_TESTED=()
+          
+          # Go Coverage
+          GO_COVERAGE="${{ needs.test-go-coverage.outputs.coverage_percentage }}"
+          if [ "${{ needs.detect-test-stack.outputs.has_go }}" = "true" ] && [ -n "$GO_COVERAGE" ] && [ "$GO_COVERAGE" != "null" ]; then
+            echo "Go coverage: ${GO_COVERAGE}%"
+            TOTAL_COVERAGE=$((TOTAL_COVERAGE + GO_COVERAGE))
+            COVERAGE_COUNT=$((COVERAGE_COUNT + 1))
+            LANGUAGES_TESTED+=("go")
+          fi
+          
+          # Python Coverage
+          PYTHON_COVERAGE="${{ needs.test-python-coverage.outputs.coverage_percentage }}"
+          if [ "${{ needs.detect-test-stack.outputs.has_python }}" = "true" ] && [ -n "$PYTHON_COVERAGE" ] && [ "$PYTHON_COVERAGE" != "null" ]; then
+            echo "Python coverage: ${PYTHON_COVERAGE}%"
+            TOTAL_COVERAGE=$((TOTAL_COVERAGE + PYTHON_COVERAGE))
+            COVERAGE_COUNT=$((COVERAGE_COUNT + 1))
+            LANGUAGES_TESTED+=("python")
+          fi
+          
+          # JS/TS Coverage
+          JS_COVERAGE="${{ needs.test-js-coverage.outputs.coverage_percentage }}"
+          if [ "${{ needs.detect-test-stack.outputs.has_typescript }}" = "true" ] || [ "${{ needs.detect-test-stack.outputs.has_react }}" = "true" ]; then
+            if [ -n "$JS_COVERAGE" ] && [ "$JS_COVERAGE" != "null" ]; then
+              echo "JavaScript/TypeScript coverage: ${JS_COVERAGE}%"
+              TOTAL_COVERAGE=$((TOTAL_COVERAGE + JS_COVERAGE))
+              COVERAGE_COUNT=$((COVERAGE_COUNT + 1))
+              LANGUAGES_TESTED+=("javascript")
+            fi
+          fi
+          
+          # Calculate overall coverage
+          if [ $COVERAGE_COUNT -gt 0 ]; then
+            OVERALL_COVERAGE=$((TOTAL_COVERAGE / COVERAGE_COUNT))
+          else
+            OVERALL_COVERAGE=0
+          fi
+          
+          echo "Overall coverage: $OVERALL_COVERAGE%"
+          echo "Languages tested: ${LANGUAGES_TESTED[*]}"
+          echo "overall_coverage=$OVERALL_COVERAGE" >> $GITHUB_OUTPUT
+          echo "languages_tested=$(IFS=,; echo "${LANGUAGES_TESTED[*]}")" >> $GITHUB_OUTPUT
+
+      - name: Determine Coverage Thresholds
+        id: thresholds
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Determining coverage thresholds based on change risk"
+          
+          # Default thresholds
+          THRESHOLD_TOTAL=${COVERAGE_THRESHOLD_TOTAL}
+          THRESHOLD_CRITICAL=${COVERAGE_THRESHOLD_CRITICAL}
+          THRESHOLD_HIGH_RISK=${COVERAGE_THRESHOLD_HIGH_RISK}
+          THRESHOLD_NEW_CODE=${COVERAGE_THRESHOLD_NEW_CODE}
+          
+          # Risk assessment based on files changed
+          RISK_LEVEL="standard"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Check for high-risk file patterns
+            git fetch origin ${{ github.base_ref }}
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || echo "")
+            
+            # High-risk patterns
+            if echo "$CHANGED_FILES" | grep -E "(auth|security|payment|database|migration)" > /dev/null 2>&1; then
+              RISK_LEVEL="high"
+              THRESHOLD_TOTAL=$THRESHOLD_HIGH_RISK
+            elif echo "$CHANGED_FILES" | grep -E "(core|engine|kernel|critical)" > /dev/null 2>&1; then
+              RISK_LEVEL="critical"
+              THRESHOLD_TOTAL=$THRESHOLD_CRITICAL
+            fi
+          fi
+          
+          echo "Risk level: $RISK_LEVEL"
+          echo "Coverage threshold: $THRESHOLD_TOTAL%"
+          echo "risk_level=$RISK_LEVEL" >> $GITHUB_OUTPUT
+          echo "threshold_total=$THRESHOLD_TOTAL" >> $GITHUB_OUTPUT
+          echo "threshold_critical=$THRESHOLD_CRITICAL" >> $GITHUB_OUTPUT
+          echo "threshold_high_risk=$THRESHOLD_HIGH_RISK" >> $GITHUB_OUTPUT
+          echo "threshold_new_code=$THRESHOLD_NEW_CODE" >> $GITHUB_OUTPUT
+
+      - name: Validate Coverage Requirements
+        id: validate
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Validating coverage against QMS requirements"
+          
+          OVERALL_COVERAGE=${{ steps.aggregate.outputs.overall_coverage }}
+          THRESHOLD=${{ steps.thresholds.outputs.threshold_total }}
+          RISK_LEVEL=${{ steps.thresholds.outputs.risk_level }}
+          
+          # Check for emergency bypass
+          BYPASS_USED=false
+          if [ "${{ github.event.inputs.bypass_coverage }}" = "true" ]; then
+            BYPASS_USED=true
+            BYPASS_REASON="${{ github.event.inputs.bypass_reason }}"
+            
+            echo "⚠️  EMERGENCY BYPASS ACTIVATED ⚠️"
+            echo "Reason: $BYPASS_REASON"
+            echo "Authorized by: ${{ github.actor }}"
+            echo "Timestamp: $(date -u)"
+            
+            # Log bypass for audit
+            echo "COVERAGE_BYPASS_LOG: {\"actor\":\"${{ github.actor }}\", \"reason\":\"$BYPASS_REASON\", \"timestamp\":\"$(date -u)\", \"pr\":\"${{ github.event.number }}\", \"commit\":\"${{ github.sha }}\"}" >> coverage-audit.log
+          fi
+          
+          # Determine if coverage passes
+          COVERAGE_PASSED=false
+          if [ "$BYPASS_USED" = "true" ]; then
+            COVERAGE_PASSED=true
+            echo "✅ Coverage validation BYPASSED (Emergency bypass used)"
+          elif [ "$OVERALL_COVERAGE" -ge "$THRESHOLD" ]; then
+            COVERAGE_PASSED=true
+            echo "✅ Coverage validation PASSED ($OVERALL_COVERAGE% >= $THRESHOLD%)"
+          else
+            echo "❌ Coverage validation FAILED ($OVERALL_COVERAGE% < $THRESHOLD%)"
+            echo "Required threshold for $RISK_LEVEL risk: $THRESHOLD%"
+          fi
+          
+          echo "bypass_used=$BYPASS_USED" >> $GITHUB_OUTPUT
+          echo "coverage_passed=$COVERAGE_PASSED" >> $GITHUB_OUTPUT
+
+      - name: Generate Coverage Report
+        run: |
+          echo "QMS_TESTING_SPECIALIST: Generating comprehensive coverage report"
+          
+          cat > coverage-report.md << 'EOF'
+          # QMS Coverage Analysis Report
+          
+          ## Summary
+          - **Overall Coverage**: ${{ steps.aggregate.outputs.overall_coverage }}%
+          - **Required Threshold**: ${{ steps.thresholds.outputs.threshold_total }}%
+          - **Risk Level**: ${{ steps.thresholds.outputs.risk_level }}
+          - **Status**: ${{ steps.validate.outputs.coverage_passed == 'true' && '✅ PASSED' || '❌ FAILED' }}
+          - **Languages Tested**: ${{ steps.aggregate.outputs.languages_tested }}
+          
+          ## QMS Quality Gates
+          - **Standard Threshold**: ${COVERAGE_THRESHOLD_TOTAL}%
+          - **High-Risk Threshold**: ${COVERAGE_THRESHOLD_HIGH_RISK}%
+          - **Critical Threshold**: ${COVERAGE_THRESHOLD_CRITICAL}%
+          - **New Code Threshold**: ${COVERAGE_THRESHOLD_NEW_CODE}%
+          
+          ## Emergency Bypass
+          - **Bypass Used**: ${{ steps.validate.outputs.bypass_used }}
+          - **Bypass Reason**: ${{ github.event.inputs.bypass_reason }}
+          
+          ## Individual Language Results
+          - **Go Coverage**: ${{ needs.test-go-coverage.outputs.coverage_percentage }}%
+          - **Python Coverage**: ${{ needs.test-python-coverage.outputs.coverage_percentage }}%
+          - **JavaScript/TypeScript Coverage**: ${{ needs.test-js-coverage.outputs.coverage_percentage }}%
+          
+          ## Recommendations
+          
+          EOF
+          
+          if [ "${{ steps.validate.outputs.coverage_passed }}" != "true" ] && [ "${{ steps.validate.outputs.bypass_used }}" != "true" ]; then
+            echo "- Increase test coverage to meet QMS requirements" >> coverage-report.md
+            echo "- Focus on testing critical paths and edge cases" >> coverage-report.md
+            echo "- Consider adding integration tests for better coverage" >> coverage-report.md
+            echo "- Review and improve existing test quality" >> coverage-report.md
+          fi
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: qms-coverage-report
+          path: |
+            coverage-report.md
+            coverage-audit.log
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # Quality Gate Enforcement
+  enforce-quality-gate:
+    name: Enforce QMS Coverage Gate
+    needs: [detect-test-stack, analyze-coverage]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: QMS Quality Gate Decision
+        run: |
+          echo "QMS_QUALITY_COORDINATOR: Making final quality gate decision"
+          
+          COVERAGE_PASSED="${{ needs.analyze-coverage.outputs.coverage_passed }}"
+          BYPASS_USED="${{ needs.analyze-coverage.outputs.bypass_used }}"
+          OVERALL_COVERAGE="${{ needs.analyze-coverage.outputs.overall_coverage }}"
+          RISK_LEVEL="${{ needs.analyze-coverage.outputs.risk_level }}"
+          THRESHOLD="${{ needs.analyze-coverage.outputs.threshold_required }}"
+          
+          echo "Coverage Analysis Result: $COVERAGE_PASSED"
+          echo "Overall Coverage: $OVERALL_COVERAGE%"
+          echo "Required Threshold: $THRESHOLD%"
+          echo "Risk Level: $RISK_LEVEL"
+          echo "Emergency Bypass Used: $BYPASS_USED"
+          
+          if [ "$COVERAGE_PASSED" = "true" ]; then
+            echo "✅ QMS Coverage Quality Gate: PASSED"
+            if [ "$BYPASS_USED" = "true" ]; then
+              echo "⚠️  NOTE: Emergency bypass was used - requires audit review"
+            fi
+            exit 0
+          else
+            echo "❌ QMS Coverage Quality Gate: FAILED"
+            echo "Coverage requirements not met and no emergency bypass authorized"
+            exit 1
+          fi
+
+      - name: Create PR Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const coveragePassed = '${{ needs.analyze-coverage.outputs.coverage_passed }}';
+            const overallCoverage = '${{ needs.analyze-coverage.outputs.overall_coverage }}';
+            const bypassUsed = '${{ needs.analyze-coverage.outputs.bypass_used }}';
+            const riskLevel = '${{ needs.analyze-coverage.outputs.risk_level }}';
+            const threshold = '${{ needs.analyze-coverage.outputs.threshold_required }}';
+            
+            const status = coveragePassed === 'true' ? '✅ PASSED' : '❌ FAILED';
+            const bypassText = bypassUsed === 'true' ? '\n\n⚠️  **Emergency Bypass Used** - Requires audit review' : '';
+            
+            const body = `## QMS Coverage Enforcement Result
+            
+            ${status}
+            
+            - **Overall Coverage**: ${overallCoverage}%
+            - **Required Threshold**: ${threshold}%
+            - **Risk Level**: ${riskLevel}
+            - **QMS Standard**: 80%
+            ${bypassText}
+            
+            ### Individual Language Results
+            - **Go**: ${{ needs.test-go-coverage.outputs.coverage_percentage }}%
+            - **Python**: ${{ needs.test-python-coverage.outputs.coverage_percentage }}%
+            - **JS/TS**: ${{ needs.test-js-coverage.outputs.coverage_percentage }}%
+            
+            For detailed coverage analysis, check the workflow artifacts.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
