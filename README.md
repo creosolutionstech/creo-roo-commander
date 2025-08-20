@@ -134,6 +134,135 @@ MCP (Model Context Protocol) servers are separate helper applications that provi
 *(Refer to Roo Commander's initial prompt (Option 0) or the `agent-mcp-manager` mode for installing and managing MCP servers.)*
 
 
+## 🔍 Quality Management System (QMS)
+
+Roo Commander includes a comprehensive **Quality Management System (QMS)** that provides enterprise-grade quality assurance throughout the software development lifecycle. The QMS ensures consistent, high-quality code delivery through automated standards enforcement, structured review processes, and comprehensive metrics tracking.
+
+### 🎯 QMS Core Features
+
+*   **Multi-Language Coding Standards:** Automated enforcement for Go, Python, TypeScript, JavaScript, and other languages
+*   **4-Step Code Review Process:** Mandatory quality validation covering functional, quality, testing, and security aspects
+*   **Real-time Quality Metrics:** Live compliance scoring and trend analysis with comprehensive dashboards
+*   **Definition of Done/Ready Validation:** Automated checks ensuring requirements are properly defined before development
+*   **GitHub Integration:** Branch protection, status checks, automated PR workflows, and merge restrictions
+*   **Observability & Monitoring:** OpenTelemetry integration with Jaeger tracing for performance monitoring
+*   **Compliance Auditing:** Automated audit trails and compliance reporting
+
+### 🔧 QMS Components
+
+#### **Quality Management Modes:**
+*   **`qms-quality-coordinator`:** Central orchestrator managing quality workflows and coordination
+*   **`qms-coding-standards`:** Multi-language coding standards enforcement engine
+*   **`qms-code-reviewer`:** 4-step systematic code review workflow implementation
+*   **`qms-dod-validator`:** Definition of Done validation and compliance checking
+*   **`qms-dor-validator`:** Definition of Ready validation ensuring proper requirements
+*   **`qms-testing-specialist`:** Comprehensive testing strategy and validation
+*   **`qms-security-scanner`:** Automated security scanning and vulnerability assessment
+*   **`qms-compliance-coordinator`:** Compliance monitoring and audit coordination
+*   **`qms-metrics-reporter`:** Real-time quality metrics collection and dashboard reporting
+*   **`lead-qms-observability`:** Observability infrastructure management and monitoring
+
+#### **Language-Specific QMS Modes:**
+*   **`dev-golang-qms`:** Go-specific quality standards and best practices
+*   **`dev-python-qms`:** Python-specific quality standards and best practices
+*   **`dev-react-qms`:** React/TypeScript quality standards and best practices
+*   **`util-typescript-qms`:** TypeScript utility and quality standards
+
+### 📊 Quality Gates & Workflows
+
+#### **Automated Quality Gates:**
+*   **Pre-commit Hooks:** Code formatting, linting, and basic quality checks
+*   **CI/CD Pipeline Gates:** Automated testing, security scanning, and compliance validation
+*   **Branch Protection:** Mandatory status checks and review requirements
+*   **Merge Restrictions:** Quality score thresholds for merge approvals
+
+#### **4-Step Code Review Process:**
+1. **Functional Review:** Code functionality and business logic validation
+2. **Quality Review:** Code quality, maintainability, and best practices
+3. **Testing Review:** Test coverage and test quality assessment
+4. **Security Review:** Security vulnerability scanning and compliance checks
+
+### 🎛️ Using the QMS
+
+#### **Basic Usage:**
+1. **Enable QMS Mode:** Select `"qms-quality-coordinator"` mode in Roo Code
+2. **Set Quality Standards:** Configure project-specific quality requirements
+3. **Run Quality Checks:** Execute automated quality assessments
+4. **Review Results:** Analyze quality metrics and compliance reports
+5. **Address Issues:** Fix identified quality violations and re-run checks
+
+#### **Development Workflow:**
+```bash
+# Enable QMS for your project
+1. Select qms-quality-coordinator mode
+2. Run "Initialize QMS for project"
+3. Configure quality standards
+4. Enable automated quality gates
+```
+
+#### **Code Review Process:**
+```bash
+1. Submit code for review
+2. QMS automatically runs 4-step review
+3. Address any quality violations
+4. Re-submit until quality gates pass
+5. Approved code can be merged
+```
+
+### 📈 Quality Metrics Dashboard
+
+The QMS provides real-time quality metrics including:
+*   **Compliance Scores:** Overall project quality compliance percentage
+*   **Standards Violations:** Count and severity of coding standard violations
+*   **Code Review Status:** Pass/fail rates for quality gates
+*   **Test Coverage:** Automated test coverage metrics
+*   **Security Issues:** Identified security vulnerabilities and fixes
+*   **Performance Metrics:** Application performance and optimization opportunities
+
+### 🔐 Security & Compliance
+
+#### **Security Features:**
+*   **Automated Security Scanning:** Continuous vulnerability assessment
+*   **Dependency Analysis:** Third-party library security checks
+*   **Code Security Review:** Automated security best practice validation
+*   **Audit Trails:** Complete security event logging and reporting
+
+#### **Compliance Standards:**
+*   **OWASP Top 10:** Web application security standards
+*   **CIS Benchmarks:** Security configuration standards
+*   **Language-Specific Standards:** Go, Python, TypeScript security guidelines
+*   **Industry Regulations:** GDPR, HIPAA, SOC 2 compliance frameworks
+
+### 🚀 Benefits of Using QMS
+
+*   **Consistent Quality:** Standardized processes ensure consistent code quality
+*   **Reduced Technical Debt:** Proactive identification and resolution of quality issues
+*   **Faster Delivery:** Automated quality gates prevent quality issues from reaching production
+*   **Better Security:** Continuous security scanning and automated vulnerability fixes
+*   **Improved Maintainability:** Enforced coding standards and best practices
+*   **Regulatory Compliance:** Automated compliance checking and audit trails
+*   **Team Productivity:** Clear quality expectations and automated validation
+
+### ⚙️ QMS Configuration
+
+#### **Quality Standards Configuration:**
+```toml
+# .ruru/config/qms-standards.toml
+[standards]
+enforce_coding_standards = true
+require_code_reviews = true
+minimum_test_coverage = 80
+security_scan_enabled = true
+
+[languages.go]
+enforce_formatting = true
+require_documentation = true
+
+[languages.python]
+max_complexity = 10
+require_type_hints = true
+```
+
 ## Contributing
 
 *(Optional: Add guidelines if you welcome contributions)*
