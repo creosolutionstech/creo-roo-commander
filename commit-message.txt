@@ -1,0 +1,18 @@
+feat(livekit): implement specialized AI agent modes for LiveKit
+
+This commit implements the LiveKit AI Agent Specification Framework as described in GitHub issue #1. It introduces a comprehensive set of specialized agent modes to handle different aspects of LiveKit integration.
+
+The implementation includes:
+- livekit-coordinator: Central routing agent that serves as the entry point
+- livekit-auth: Authentication specialist for JWT tokens and API key management
+- livekit-track: Media track management for audio, video, and data
+- livekit-room: Room creation, configuration, and participant management
+- livekit-recording: Session recording functionality and storage
+- livekit-egress: Content export and delivery to external platforms
+- livekit-webhook: Webhook event handling and third-party integrations
+
+Each mode follows a standardized structure with TOML metadata and detailed markdown documentation covering responsibilities, capabilities, implementation examples, and best practices.
+
+This implementation addresses the core requirements of issue #1 by creating a specialized multi-agent system that facilitates integration with LiveKit's real-time communication platform.
+
+Resolves: #1
