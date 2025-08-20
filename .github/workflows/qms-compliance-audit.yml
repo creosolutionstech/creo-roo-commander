@@ -1,0 +1,819 @@
+name: QMS Compliance Audit
+run-name: 🔍 Compliance Audit - ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.number) || github.ref_name }} by @${{ github.actor }}
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      audit_scope:
+        description: 'Scope of compliance audit'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - sox
+          - gdpr
+          - hipaa
+          - iso27001
+          - custom
+      severity_threshold:
+        description: 'Minimum severity to report'
+        required: false
+        default: 'medium'
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - critical
+      generate_executive_report:
+        description: 'Generate executive summary report'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  QMS_AUDIT_SCOPE: ${{ github.event.inputs.audit_scope || 'full' }}
+  QMS_SEVERITY_THRESHOLD: ${{ github.event.inputs.severity_threshold || 'medium' }}
+  QMS_EXECUTIVE_REPORT: ${{ github.event.inputs.generate_executive_report || 'true' }}
+  QMS_DASHBOARD_URL: ${{ secrets.QMS_DASHBOARD_URL || 'http://localhost:3000' }}
+  QMS_API_TOKEN: ${{ secrets.QMS_API_TOKEN }}
+  QMS_COMPLIANCE_DB_URL: ${{ secrets.QMS_COMPLIANCE_DB_URL }}
+  NOTIFICATION_WEBHOOK: ${{ secrets.QMS_NOTIFICATION_WEBHOOK }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  security-events: write
+
+jobs:
+  # ==================================================
+  # PHASE 1: SETUP & INITIALIZATION
+  # ==================================================
+  
+  setup:
+    name: 🚀 Setup & Discovery
+    runs-on: ubuntu-latest
+    outputs:
+      has_compliance_config: ${{ steps.detect.outputs.has_compliance_config }}
+      compliance_frameworks: ${{ steps.detect.outputs.compliance_frameworks }}
+      requires_sox: ${{ steps.detect.outputs.requires_sox }}
+      requires_gdpr: ${{ steps.detect.outputs.requires_gdpr }}
+      requires_hipaa: ${{ steps.detect.outputs.requires_hipaa }}
+      requires_iso27001: ${{ steps.detect.outputs.requires_iso27001 }}
+      audit_matrix: ${{ steps.matrix.outputs.audit_matrix }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Detect Compliance Requirements
+        id: detect
+        run: |
+          echo "🔍 Detecting compliance requirements..."
+          
+          # Initialize detection flags
+          HAS_COMPLIANCE_CONFIG=false
+          FRAMEWORKS=""
+          REQUIRES_SOX=false
+          REQUIRES_GDPR=false
+          REQUIRES_HIPAA=false
+          REQUIRES_ISO27001=false
+          
+          # Check for compliance configuration files
+          if [[ -f ".qms/compliance/config.yml" || -f "compliance.config.json" || -f ".compliance.yml" ]]; then
+            HAS_COMPLIANCE_CONFIG=true
+            echo "✅ Found compliance configuration"
+          fi
+          
+          # Detect framework requirements based on codebase patterns
+          if grep -r "SOX\|Sarbanes.Oxley\|financial.reporting" --include="*.md" --include="*.txt" --include="*.yml" . > /dev/null 2>&1; then
+            REQUIRES_SOX=true
+            FRAMEWORKS="${FRAMEWORKS},sox"
+            echo "📊 SOX compliance required"
+          fi
+          
+          if grep -r "GDPR\|General.Data.Protection\|personal.data\|privacy.policy" --include="*.md" --include="*.txt" --include="*.yml" . > /dev/null 2>&1; then
+            REQUIRES_GDPR=true
+            FRAMEWORKS="${FRAMEWORKS},gdpr"
+            echo "🛡️ GDPR compliance required"
+          fi
+          
+          if grep -r "HIPAA\|Health.Insurance\|medical.data\|PHI" --include="*.md" --include="*.txt" --include="*.yml" . > /dev/null 2>&1; then
+            REQUIRES_HIPAA=true
+            FRAMEWORKS="${FRAMEWORKS},hipaa"
+            echo "🏥 HIPAA compliance required"
+          fi
+          
+          if grep -r "ISO.27001\|information.security.management" --include="*.md" --include="*.txt" --include="*.yml" . > /dev/null 2>&1; then
+            REQUIRES_ISO27001=true
+            FRAMEWORKS="${FRAMEWORKS},iso27001"
+            echo "🔐 ISO 27001 compliance required"
+          fi
+          
+          # Clean up frameworks list
+          FRAMEWORKS=$(echo "$FRAMEWORKS" | sed 's/^,//')
+          
+          # Output results
+          echo "has_compliance_config=$HAS_COMPLIANCE_CONFIG" >> $GITHUB_OUTPUT
+          echo "compliance_frameworks=$FRAMEWORKS" >> $GITHUB_OUTPUT
+          echo "requires_sox=$REQUIRES_SOX" >> $GITHUB_OUTPUT
+          echo "requires_gdpr=$REQUIRES_GDPR" >> $GITHUB_OUTPUT
+          echo "requires_hipaa=$REQUIRES_HIPAA" >> $GITHUB_OUTPUT
+          echo "requires_iso27001=$REQUIRES_ISO27001" >> $GITHUB_OUTPUT
+
+      - name: Generate Audit Matrix
+        id: matrix
+        run: |
+          echo "🎯 Generating audit execution matrix..."
+          
+          # Base audit categories
+          MATRIX='["infrastructure","application","data","processes","documentation"]'
+          
+          # Scope-specific adjustments
+          case "${{ env.QMS_AUDIT_SCOPE }}" in
+            "sox")
+              MATRIX='["financial-controls","data-integrity","access-management","audit-trails"]'
+              ;;
+            "gdpr")
+              MATRIX='["data-protection","privacy-controls","consent-management","breach-procedures"]'
+              ;;
+            "hipaa")
+              MATRIX='["phi-protection","access-controls","audit-logs","encryption","breach-response"]'
+              ;;
+            "iso27001")
+              MATRIX='["security-controls","risk-management","incident-response","business-continuity"]'
+              ;;
+            "custom")
+              MATRIX='["custom-framework","organization-specific"]'
+              ;;
+          esac
+          
+          echo "audit_matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Generated audit matrix: $MATRIX"
+
+      - name: Initialize QMS Dashboard
+        run: |
+          echo "📊 Initializing QMS compliance dashboard..."
+          
+          # Create audit session
+          curl -X POST "${{ env.QMS_DASHBOARD_URL }}/api/compliance/audit/start" \
+            -H "Authorization: Bearer ${{ env.QMS_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "workflow_id": "${{ github.run_id }}",
+              "repository": "${{ github.repository }}",
+              "branch": "${{ github.ref_name }}",
+              "commit_sha": "${{ github.sha }}",
+              "audit_scope": "${{ env.QMS_AUDIT_SCOPE }}",
+              "frameworks": "${{ steps.detect.outputs.compliance_frameworks }}",
+              "initiated_by": "${{ github.actor }}",
+              "pr_number": "${{ github.event.pull_request.number || null }}"
+            }' \
+            --fail-with-body || echo "⚠️ Dashboard initialization failed (non-critical)"
+
+  # ==================================================
+  # PHASE 2: SOX COMPLIANCE AUDIT
+  # ==================================================
+  
+  sox-compliance:
+    name: 📊 SOX Compliance Audit
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.requires_sox == 'true' && ((github.event.inputs.audit_scope || 'full') == 'full' || (github.event.inputs.audit_scope || 'full') == 'sox')
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: SOX Financial Controls Audit
+        run: |
+          echo "💰 Auditing SOX financial controls compliance..."
+          
+          # Create results directory
+          mkdir -p compliance-results/sox
+          
+          # Audit financial data handling
+          echo "🔍 Checking financial data handling patterns..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "financial\|revenue\|expense\|audit.*trail\|transaction" {} \; \
+            > compliance-results/sox/financial_data_files.txt || true
+          
+          # Check for proper logging and audit trails
+          echo "📝 Validating audit trail implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "audit.*log\|transaction.*log\|financial.*log" {} \; \
+            > compliance-results/sox/audit_trail_files.txt || true
+          
+          # Validate access controls
+          echo "🔐 Checking access control implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "@RequiresRole\|@Secured\|check_permission\|authorize" {} \; \
+            > compliance-results/sox/access_control_files.txt || true
+          
+          # Check for separation of duties
+          echo "⚖️ Analyzing separation of duties..."
+          find . -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.json" \) \
+            -exec grep -l "approval.*workflow\|dual.*control\|four.*eyes" {} \; \
+            > compliance-results/sox/separation_duties_files.txt || true
+          
+          # Generate SOX compliance report
+          cat > compliance-results/sox/sox_audit_report.json << 'EOF'
+          {
+            "audit_type": "sox_compliance",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "findings": {
+              "financial_data_files": $(wc -l < compliance-results/sox/financial_data_files.txt),
+              "audit_trail_files": $(wc -l < compliance-results/sox/audit_trail_files.txt),
+              "access_control_files": $(wc -l < compliance-results/sox/access_control_files.txt),
+              "separation_duties_files": $(wc -l < compliance-results/sox/separation_duties_files.txt)
+            },
+            "compliance_status": "requires_review"
+          }
+          EOF
+          
+          echo "✅ SOX compliance audit completed"
+
+      - name: Upload SOX Compliance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sox-compliance-results
+          path: compliance-results/sox/
+          retention-days: 30
+
+  # ==================================================
+  # PHASE 3: GDPR COMPLIANCE AUDIT
+  # ==================================================
+  
+  gdpr-compliance:
+    name: 🛡️ GDPR Compliance Audit
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.requires_gdpr == 'true' && ((github.event.inputs.audit_scope || 'full') == 'full' || (github.event.inputs.audit_scope || 'full') == 'gdpr')
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: GDPR Data Protection Audit
+        run: |
+          echo "🔒 Auditing GDPR data protection compliance..."
+          
+          # Create results directory
+          mkdir -p compliance-results/gdpr
+          
+          # Check for personal data handling
+          echo "👤 Scanning for personal data handling..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "email\|phone\|address\|ssn\|personal.*data\|pii" {} \; \
+            > compliance-results/gdpr/personal_data_files.txt || true
+          
+          # Validate data encryption
+          echo "🔐 Checking data encryption implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "encrypt\|crypto\|AES\|RSA\|bcrypt" {} \; \
+            > compliance-results/gdpr/encryption_files.txt || true
+          
+          # Check for consent management
+          echo "✅ Analyzing consent management..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.html" -o -name "*.vue" \) \
+            -exec grep -l "consent\|gdpr.*accept\|privacy.*policy" {} \; \
+            > compliance-results/gdpr/consent_files.txt || true
+          
+          # Validate data retention policies
+          echo "📅 Checking data retention implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "retention\|expiry\|delete.*after\|cleanup" {} \; \
+            > compliance-results/gdpr/retention_files.txt || true
+          
+          # Check for right to be forgotten implementation
+          echo "🗑️ Validating data deletion capabilities..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "delete.*user\|purge.*data\|anonymize" {} \; \
+            > compliance-results/gdpr/deletion_files.txt || true
+          
+          # Generate GDPR compliance report
+          cat > compliance-results/gdpr/gdpr_audit_report.json << 'EOF'
+          {
+            "audit_type": "gdpr_compliance",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "findings": {
+              "personal_data_files": $(wc -l < compliance-results/gdpr/personal_data_files.txt),
+              "encryption_files": $(wc -l < compliance-results/gdpr/encryption_files.txt),
+              "consent_files": $(wc -l < compliance-results/gdpr/consent_files.txt),
+              "retention_files": $(wc -l < compliance-results/gdpr/retention_files.txt),
+              "deletion_files": $(wc -l < compliance-results/gdpr/deletion_files.txt)
+            },
+            "compliance_status": "requires_review"
+          }
+          EOF
+          
+          echo "✅ GDPR compliance audit completed"
+
+      - name: Upload GDPR Compliance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdpr-compliance-results
+          path: compliance-results/gdpr/
+          retention-days: 30
+
+  # ==================================================
+  # PHASE 4: HIPAA COMPLIANCE AUDIT
+  # ==================================================
+  
+  hipaa-compliance:
+    name: 🏥 HIPAA Compliance Audit
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.requires_hipaa == 'true' && ((github.event.inputs.audit_scope || 'full') == 'full' || (github.event.inputs.audit_scope || 'full') == 'hipaa')
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: HIPAA PHI Protection Audit
+        run: |
+          echo "🩺 Auditing HIPAA PHI protection compliance..."
+          
+          # Create results directory
+          mkdir -p compliance-results/hipaa
+          
+          # Check for PHI handling
+          echo "📋 Scanning for PHI data handling..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "phi\|medical.*record\|patient.*data\|health.*info\|diagnosis\|prescription" {} \; \
+            > compliance-results/hipaa/phi_files.txt || true
+          
+          # Validate encryption at rest and in transit
+          echo "🔐 Checking PHI encryption implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "TLS\|SSL\|encrypt.*at.*rest\|encrypt.*in.*transit" {} \; \
+            > compliance-results/hipaa/encryption_files.txt || true
+          
+          # Check for access controls
+          echo "🔑 Analyzing access control implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "role.*based\|minimum.*necessary\|need.*to.*know" {} \; \
+            > compliance-results/hipaa/access_control_files.txt || true
+          
+          # Validate audit logging
+          echo "📝 Checking HIPAA audit trail implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "audit.*log\|access.*log\|phi.*access" {} \; \
+            > compliance-results/hipaa/audit_log_files.txt || true
+          
+          # Check for breach notification procedures
+          echo "🚨 Validating breach response procedures..."
+          find . -type f \( -name "*.md" -o -name "*.txt" -o -name "*.yml" -o -name "*.yaml" \) \
+            -exec grep -l "breach.*response\|incident.*response\|notification.*procedure" {} \; \
+            > compliance-results/hipaa/breach_response_files.txt || true
+          
+          # Generate HIPAA compliance report
+          cat > compliance-results/hipaa/hipaa_audit_report.json << 'EOF'
+          {
+            "audit_type": "hipaa_compliance",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "findings": {
+              "phi_files": $(wc -l < compliance-results/hipaa/phi_files.txt),
+              "encryption_files": $(wc -l < compliance-results/hipaa/encryption_files.txt),
+              "access_control_files": $(wc -l < compliance-results/hipaa/access_control_files.txt),
+              "audit_log_files": $(wc -l < compliance-results/hipaa/audit_log_files.txt),
+              "breach_response_files": $(wc -l < compliance-results/hipaa/breach_response_files.txt)
+            },
+            "compliance_status": "requires_review"
+          }
+          EOF
+          
+          echo "✅ HIPAA compliance audit completed"
+
+      - name: Upload HIPAA Compliance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipaa-compliance-results
+          path: compliance-results/hipaa/
+          retention-days: 30
+
+  # ==================================================
+  # PHASE 5: ISO 27001 COMPLIANCE AUDIT
+  # ==================================================
+  
+  iso27001-compliance:
+    name: 🔐 ISO 27001 Compliance Audit
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.requires_iso27001 == 'true' && ((github.event.inputs.audit_scope || 'full') == 'full' || (github.event.inputs.audit_scope || 'full') == 'iso27001')
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ISO 27001 Security Controls Audit
+        run: |
+          echo "🛡️ Auditing ISO 27001 security controls compliance..."
+          
+          # Create results directory
+          mkdir -p compliance-results/iso27001
+          
+          # Check for security controls implementation
+          echo "🔒 Scanning security controls implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "security.*control\|authentication\|authorization\|session.*management" {} \; \
+            > compliance-results/iso27001/security_controls_files.txt || true
+          
+          # Validate risk management
+          echo "⚠️ Checking risk management procedures..."
+          find . -type f \( -name "*.md" -o -name "*.txt" -o -name "*.yml" -o -name "*.yaml" \) \
+            -exec grep -l "risk.*assessment\|threat.*model\|vulnerability.*management" {} \; \
+            > compliance-results/iso27001/risk_management_files.txt || true
+          
+          # Check for incident response procedures
+          echo "🚨 Analyzing incident response capabilities..."
+          find . -type f \( -name "*.md" -o -name "*.txt" -o -name "*.yml" -o -name "*.yaml" -o -name "*.py" \) \
+            -exec grep -l "incident.*response\|security.*incident\|alert\|notification" {} \; \
+            > compliance-results/iso27001/incident_response_files.txt || true
+          
+          # Validate business continuity
+          echo "🔄 Checking business continuity planning..."
+          find . -type f \( -name "*.md" -o -name "*.txt" -o -name "*.yml" -o -name "*.yaml" \) \
+            -exec grep -l "business.*continuity\|disaster.*recovery\|backup\|failover" {} \; \
+            > compliance-results/iso27001/business_continuity_files.txt || true
+          
+          # Check for security monitoring
+          echo "👁️ Validating security monitoring implementation..."
+          find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+            -exec grep -l "monitor\|detect\|alert\|siem\|log.*analysis" {} \; \
+            > compliance-results/iso27001/monitoring_files.txt || true
+          
+          # Generate ISO 27001 compliance report
+          cat > compliance-results/iso27001/iso27001_audit_report.json << 'EOF'
+          {
+            "audit_type": "iso27001_compliance",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "findings": {
+              "security_controls_files": $(wc -l < compliance-results/iso27001/security_controls_files.txt),
+              "risk_management_files": $(wc -l < compliance-results/iso27001/risk_management_files.txt),
+              "incident_response_files": $(wc -l < compliance-results/iso27001/incident_response_files.txt),
+              "business_continuity_files": $(wc -l < compliance-results/iso27001/business_continuity_files.txt),
+              "monitoring_files": $(wc -l < compliance-results/iso27001/monitoring_files.txt)
+            },
+            "compliance_status": "requires_review"
+          }
+          EOF
+          
+          echo "✅ ISO 27001 compliance audit completed"
+
+      - name: Upload ISO 27001 Compliance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso27001-compliance-results
+          path: compliance-results/iso27001/
+          retention-days: 30
+
+  # ==================================================
+  # PHASE 6: GENERAL COMPLIANCE AUDIT
+  # ==================================================
+  
+  general-compliance:
+    name: 📋 General Compliance Audit
+    runs-on: ubuntu-latest
+    needs: [setup]
+    strategy:
+      matrix:
+        audit_category: ${{ fromJson(needs.setup.outputs.audit_matrix) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run General Compliance Audit
+        run: |
+          echo "🔍 Running general compliance audit for: ${{ matrix.audit_category }}"
+          
+          # Create results directory
+          mkdir -p compliance-results/general/${{ matrix.audit_category }}
+          
+          case "${{ matrix.audit_category }}" in
+            "infrastructure")
+              echo "🏗️ Auditing infrastructure compliance..."
+              # Check for infrastructure as code
+              find . -type f \( -name "*.tf" -o -name "*.yml" -o -name "*.yaml" -o -name "Dockerfile" \) \
+                > compliance-results/general/${{ matrix.audit_category }}/iac_files.txt || true
+              
+              # Check for security configurations
+              find . -type f \( -name "*.tf" -o -name "*.yml" -o -name "*.yaml" \) \
+                -exec grep -l "security.*group\|firewall\|network.*acl\|encryption" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/security_config_files.txt || true
+              ;;
+              
+            "application")
+              echo "💻 Auditing application compliance..."
+              # Check for secure coding practices
+              find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+                -exec grep -l "input.*validation\|sanitize\|escape\|csrf" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/secure_coding_files.txt || true
+              
+              # Check for dependency scanning
+              find . -type f \( -name "package.json" -o -name "requirements.txt" -o -name "pom.xml" -o -name "*.csproj" \) \
+                > compliance-results/general/${{ matrix.audit_category }}/dependency_files.txt || true
+              ;;
+              
+            "data")
+              echo "💾 Auditing data compliance..."
+              # Check for data classification
+              find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.sql" \) \
+                -exec grep -l "classify\|sensitive\|confidential\|public" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/data_classification_files.txt || true
+              
+              # Check for data protection measures
+              find . -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.cs" \) \
+                -exec grep -l "mask\|redact\|anonymize\|pseudonymize" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/data_protection_files.txt || true
+              ;;
+              
+            "processes")
+              echo "⚙️ Auditing process compliance..."
+              # Check for documented procedures
+              find . -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) \
+                -exec grep -l "procedure\|process\|workflow\|guideline" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/process_files.txt || true
+              
+              # Check for approval workflows
+              find . -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.json" \) \
+                -exec grep -l "approval\|review\|gate\|checkpoint" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/approval_files.txt || true
+              ;;
+              
+            "documentation")
+              echo "📚 Auditing documentation compliance..."
+              # Check for required documentation
+              find . -type f \( -name "README*" -o -name "CHANGELOG*" -o -name "LICENSE*" -o -name "SECURITY*" \) \
+                > compliance-results/general/${{ matrix.audit_category }}/required_docs.txt || true
+              
+              # Check for API documentation
+              find . -type f \( -name "*.yml" -o -name "*.yaml" -o -name "*.json" \) \
+                -exec grep -l "openapi\|swagger\|api.*spec" {} \; \
+                > compliance-results/general/${{ matrix.audit_category }}/api_docs.txt || true
+              ;;
+          esac
+          
+          # Generate category-specific report
+          cat > compliance-results/general/${{ matrix.audit_category }}/audit_report.json << 'EOF'
+          {
+            "audit_type": "general_compliance",
+            "category": "${{ matrix.audit_category }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "status": "completed"
+          }
+          EOF
+          
+          echo "✅ ${{ matrix.audit_category }} compliance audit completed"
+
+      - name: Upload General Compliance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: general-compliance-${{ matrix.audit_category }}-results
+          path: compliance-results/general/${{ matrix.audit_category }}/
+          retention-days: 30
+
+  # ==================================================
+  # PHASE 7: COMPLIANCE REPORT GENERATION
+  # ==================================================
+  
+  generate-reports:
+    name: 📊 Generate Compliance Reports
+    runs-on: ubuntu-latest
+    needs: [setup, sox-compliance, gdpr-compliance, hipaa-compliance, iso27001-compliance, general-compliance]
+    if: always()
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Compliance Results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-compliance-*-results"
+          merge-multiple: true
+          path: compliance-results/
+
+      - name: Install Report Dependencies
+        run: |
+          echo "📦 Installing report generation dependencies..."
+          pip install jinja2 pyyaml python-dateutil
+
+      - name: Generate Consolidated Compliance Report
+        run: |
+          echo "📋 Generating consolidated compliance report..."
+          
+          python3 << 'EOF'
+          import json
+          import os
+          import glob
+          from datetime import datetime
+          import yaml
+          
+          # Collect all audit results
+          results = {
+            "metadata": {
+              "workflow_id": "${{ github.run_id }}",
+              "repository": "${{ github.repository }}",
+              "branch": "${{ github.ref_name }}",
+              "commit_sha": "${{ github.sha }}",
+              "audit_scope": "${{ env.QMS_AUDIT_SCOPE }}",
+              "severity_threshold": "${{ env.QMS_SEVERITY_THRESHOLD }}",
+              "generated_at": datetime.utcnow().isoformat(),
+              "generated_by": "${{ github.actor }}"
+            },
+            "frameworks": {},
+            "general": {},
+            "summary": {
+              "total_audits": 0,
+              "passed": 0,
+              "failed": 0,
+              "warnings": 0,
+              "total_findings": 0
+            }
+          }
+          
+          # Process framework-specific results
+          for framework in ["sox", "gdpr", "hipaa", "iso27001"]:
+            report_file = f"compliance-results/{framework}/{framework}_audit_report.json"
+            if os.path.exists(report_file):
+              with open(report_file, 'r') as f:
+                results["frameworks"][framework] = json.load(f)
+                results["summary"]["total_audits"] += 1
+          
+          # Process general compliance results
+          for category_dir in glob.glob("compliance-results/general/*/"):
+            category = os.path.basename(category_dir.rstrip('/'))
+            report_file = os.path.join(category_dir, "audit_report.json")
+            if os.path.exists(report_file):
+              with open(report_file, 'r') as f:
+                results["general"][category] = json.load(f)
+                results["summary"]["total_audits"] += 1
+          
+          # Save consolidated report
+          with open("compliance-results/consolidated_compliance_report.json", 'w') as f:
+            json.dump(results, f, indent=2)
+          
+          # Generate summary
+          print(f"Generated consolidated report with {results['summary']['total_audits']} audits")
+          EOF
+
+      - name: Generate Executive Summary
+        if: env.QMS_EXECUTIVE_REPORT == 'true'
+        run: |
+          echo "👔 Generating executive summary report..."
+          
+          python3 << 'EOF'
+          import json
+          from datetime import datetime
+          
+          # Load consolidated report
+          with open("compliance-results/consolidated_compliance_report.json", 'r') as f:
+            report = json.load(f)
+          
+          # Generate executive summary
+          executive_summary = f"""
+          # QMS Compliance Audit - Executive Summary
+          
+          **Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+          **Repository:** {report['metadata']['repository']}
+          **Branch:** {report['metadata']['branch']}
+          **Audit Scope:** {report['metadata']['audit_scope'].upper()}
+          
+          ## Overview
+          
+          This report summarizes the compliance audit results for the specified scope and frameworks.
+          
+          ### Audit Statistics
+          - **Total Audits Performed:** {report['summary']['total_audits']}
+          - **Frameworks Evaluated:** {', '.join(report['frameworks'].keys()).upper()}
+          - **General Categories:** {', '.join(report['general'].keys()).title()}
+          
+          ### Key Findings
+          
+          """
+          
+          # Add framework-specific findings
+          for framework, data in report['frameworks'].items():
+            executive_summary += f"""
+          #### {framework.upper()} Compliance
+          - **Status:** {data.get('compliance_status', 'Unknown')}
+          - **Findings:** {sum(data.get('findings', {}).values())} items identified
+          """
+          
+          # Add recommendations
+          executive_summary += """
+          
+          ## Recommendations
+          
+          1. **Review Identified Items:** All flagged files and configurations should be reviewed for compliance.
+          2. **Implement Controls:** Where gaps are identified, implement appropriate compliance controls.
+          3. **Regular Auditing:** Schedule regular compliance audits to maintain adherence.
+          4. **Documentation:** Ensure all compliance measures are properly documented.
+          
+          ## Next Steps
+          
+          1. Detailed review of all findings by compliance team
+          2. Remediation plan development for any identified gaps
+          3. Implementation of recommended controls
+          4. Follow-up audit to verify remediation
+          
+          ---
+          
+          *This is an automated compliance audit report. For questions or detailed analysis, please contact the compliance team.*
+          """
+          
+          # Save executive summary
+          with open("compliance-results/executive_summary.md", 'w') as f:
+            f.write(executive_summary)
+          
+          print("Executive summary generated successfully")
+          EOF
+
+      - name: Upload Final Compliance Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: qms-compliance-final-reports
+          path: compliance-results/
+          retention-days: 90
+
+      - name: Update QMS Dashboard
+        run: |
+          echo "📊 Updating QMS compliance dashboard..."
+          
+          # Upload consolidated results to dashboard
+          curl -X POST "${{ env.QMS_DASHBOARD_URL }}/api/compliance/audit/complete" \
+            -H "Authorization: Bearer ${{ env.QMS_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d @compliance-results/consolidated_compliance_report.json \
+            --fail-with-body || echo "⚠️ Dashboard update failed (non-critical)"
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read executive summary if it exists
+            let summary = "## 🔍 QMS Compliance Audit Results\n\n";
+            try {
+              summary += fs.readFileSync('compliance-results/executive_summary.md', 'utf8');
+            } catch (error) {
+              summary += "Compliance audit completed. Detailed results are available in the workflow artifacts.";
+            }
+            
+            // Post comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  # ==================================================
+  # PHASE 8: NOTIFICATION & ALERTING
+  # ==================================================
+  
+  notify:
+    name: 📢 Notifications & Alerting
+    runs-on: ubuntu-latest
+    needs: [setup, generate-reports]
+    if: always()
+    steps:
+      - name: Send Compliance Notifications
+        if: env.NOTIFICATION_WEBHOOK != ''
+        run: |
+          echo "📧 Sending compliance audit notifications..."
+          
+          # Determine overall status
+          OVERALL_STATUS="SUCCESS"
+          if [[ "${{ needs.generate-reports.result }}" == "failure" ]]; then
+            OVERALL_STATUS="FAILURE"
+          elif [[ "${{ needs.generate-reports.result }}" == "cancelled" ]]; then
+            OVERALL_STATUS="CANCELLED"
+          fi
+          
+          # Send notification webhook
+          curl -X POST "${{ env.NOTIFICATION_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "type": "qms_compliance_audit",
+              "status": "'$OVERALL_STATUS'",
+              "repository": "${{ github.repository }}",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}",
+              "workflow_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "audit_scope": "${{ env.QMS_AUDIT_SCOPE }}",
+              "severity_threshold": "${{ env.QMS_SEVERITY_THRESHOLD }}",
+              "initiated_by": "${{ github.actor }}",
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }' \
+            --fail-with-body || echo "⚠️ Notification webhook failed (non-critical)"
+
+      - name: Set Final Status
+        run: |
+          echo "🏁 QMS Compliance Audit workflow completed"
+          echo "📊 Audit Scope: ${{ env.QMS_AUDIT_SCOPE }}"
+          echo "⚡ Severity Threshold: ${{ env.QMS_SEVERITY_THRESHOLD }}"
+          echo "📋 Executive Report: ${{ env.QMS_EXECUTIVE_REPORT }}"

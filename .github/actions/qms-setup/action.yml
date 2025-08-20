@@ -1,0 +1,223 @@
+name: 'QMS Setup'
+description: 'Initialize QMS environment and dependencies for quality gate execution'
+branding:
+  icon: 'settings'
+  color: 'blue'
+
+inputs:
+  qms-version:
+    description: 'QMS version to install'
+    required: false
+    default: 'latest'
+  dashboard-url:
+    description: 'QMS Dashboard URL'
+    required: false
+    default: 'http://localhost:3000'
+  api-token:
+    description: 'QMS API authentication token'
+    required: true
+  setup-type:
+    description: 'Type of QMS setup (full, minimal, testing)'
+    required: false
+    default: 'full'
+  cache-enabled:
+    description: 'Enable caching for faster subsequent runs'
+    required: false
+    default: 'true'
+
+outputs:
+  qms-version:
+    description: 'Installed QMS version'
+    value: ${{ steps.setup.outputs.qms-version }}
+  setup-time:
+    description: 'Time taken for setup in seconds'
+    value: ${{ steps.setup.outputs.setup-time }}
+  cache-hit:
+    description: 'Whether cache was hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating QMS setup inputs..."
+        
+        # Validate setup type
+        case "${{ inputs.setup-type }}" in
+          "full"|"minimal"|"testing")
+            echo "✅ Valid setup type: ${{ inputs.setup-type }}"
+            ;;
+          *)
+            echo "❌ Invalid setup type: ${{ inputs.setup-type }}"
+            echo "Valid options: full, minimal, testing"
+            exit 1
+            ;;
+        esac
+        
+        # Validate API token format (basic check)
+        if [[ -z "${{ inputs.api-token }}" ]]; then
+          echo "❌ QMS API token is required"
+          exit 1
+        fi
+        
+        echo "✅ Input validation completed"
+
+    - name: Setup Node.js for QMS Tools
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Setup Python for QMS Analytics
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+
+    - name: Cache QMS Dependencies
+      id: cache
+      if: inputs.cache-enabled == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.qms
+          ~/.cache/pip
+          ~/.npm
+        key: qms-${{ inputs.qms-version }}-${{ inputs.setup-type }}-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/requirements.txt') }}
+        restore-keys: |
+          qms-${{ inputs.qms-version }}-${{ inputs.setup-type }}-${{ runner.os }}-
+          qms-${{ inputs.qms-version }}-${{ runner.os }}-
+          qms-${{ runner.os }}-
+
+    - name: Install QMS Core Dependencies
+      shell: bash
+      run: |
+        echo "📦 Installing QMS core dependencies..."
+        START_TIME=$(date +%s)
+        
+        # Install core QMS tools
+        if [[ "${{ steps.cache.outputs.cache-hit }}" != "true" ]]; then
+          echo "Installing from scratch..."
+          
+          # Node.js dependencies for QMS
+          npm install -g @qms/cli@${{ inputs.qms-version }} \
+                         @qms/dashboard-client \
+                         @qms/report-generator \
+                         eslint \
+                         prettier \
+                         jest \
+                         cypress
+          
+          # Python dependencies for analytics and reporting
+          pip install --upgrade pip
+          pip install pytest \
+                     coverage \
+                     flake8 \
+                     black \
+                     bandit \
+                     safety \
+                     requests \
+                     jinja2 \
+                     pyyaml \
+                     python-dateutil
+          
+          # Additional tools based on setup type
+          case "${{ inputs.setup-type }}" in
+            "full")
+              echo "Installing full QMS suite..."
+              npm install -g sonarjs \
+                           lighthouse \
+                           pa11y
+              pip install selenium \
+                         locust \
+                         prospector
+              ;;
+            "minimal")
+              echo "Installing minimal QMS tools..."
+              ;;
+            "testing")
+              echo "Installing testing-focused QMS tools..."
+              npm install -g newman \
+                           artillery
+              pip install pytest-cov \
+                         pytest-xdist \
+                         allure-pytest
+              ;;
+          esac
+        else
+          echo "✅ Using cached dependencies"
+        fi
+        
+        # Verify installations
+        echo "🔍 Verifying QMS installations..."
+        qms --version || echo "⚠️ QMS CLI not available"
+        node --version
+        python --version
+        pip --version
+        
+        END_TIME=$(date +%s)
+        SETUP_TIME=$((END_TIME - START_TIME))
+        echo "setup-time=$SETUP_TIME" >> $GITHUB_OUTPUT
+        
+        echo "✅ QMS dependencies installed successfully in ${SETUP_TIME}s"
+
+    - name: Configure QMS Environment
+      id: setup
+      shell: bash
+      run: |
+        echo "⚙️ Configuring QMS environment..."
+        
+        # Create QMS configuration directory
+        mkdir -p ~/.qms/config
+        
+        # Generate QMS configuration
+        cat > ~/.qms/config/qms.yml << EOF
+        qms:
+          version: "${{ inputs.qms-version }}"
+          setup_type: "${{ inputs.setup-type }}"
+          dashboard:
+            url: "${{ inputs.dashboard-url }}"
+            api_token: "${{ inputs.api-token }}"
+          workflows:
+            enabled: true
+            timeout: 3600
+          reporting:
+            format: ["json", "html", "junit"]
+            retention_days: 30
+          cache:
+            enabled: ${{ inputs.cache-enabled }}
+        EOF
+        
+        # Set environment variables for QMS
+        echo "QMS_CONFIG_PATH=~/.qms/config/qms.yml" >> $GITHUB_ENV
+        echo "QMS_DASHBOARD_URL=${{ inputs.dashboard-url }}" >> $GITHUB_ENV
+        echo "QMS_API_TOKEN=${{ inputs.api-token }}" >> $GITHUB_ENV
+        echo "QMS_SETUP_TYPE=${{ inputs.setup-type }}" >> $GITHUB_ENV
+        echo "QMS_CACHE_ENABLED=${{ inputs.cache-enabled }}" >> $GITHUB_ENV
+        
+        # Output QMS version for downstream use
+        QMS_VERSION=$(qms --version 2>/dev/null || echo "${{ inputs.qms-version }}")
+        echo "qms-version=$QMS_VERSION" >> $GITHUB_OUTPUT
+        
+        # Initialize QMS workspace
+        qms init --config ~/.qms/config/qms.yml 2>/dev/null || echo "⚠️ QMS workspace initialization skipped"
+        
+        echo "✅ QMS environment configured"
+
+    - name: Test QMS Connection
+      shell: bash
+      run: |
+        echo "🔗 Testing QMS dashboard connection..."
+        
+        # Test API connectivity
+        if curl -f -s -H "Authorization: Bearer ${{ inputs.api-token }}" \
+               -H "Content-Type: application/json" \
+               "${{ inputs.dashboard-url }}/api/health" > /dev/null 2>&1; then
+          echo "✅ QMS Dashboard connection successful"
+        else
+          echo "⚠️ QMS Dashboard connection failed (non-critical for setup)"
+        fi
+        
+        echo "🚀 QMS setup completed successfully!"

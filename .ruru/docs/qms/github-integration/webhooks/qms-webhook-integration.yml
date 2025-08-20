@@ -1,0 +1,674 @@
+# QMS GitHub Webhook Integration Configuration
+# Provides standardized webhook endpoints for external QMS tools integration
+# Part of the 4-Step QMS Review Workflow GitHub Integration Framework
+
+# =============================================================================
+# WEBHOOK ENDPOINT CONFIGURATIONS
+# =============================================================================
+
+webhook_endpoints:
+  # Base webhook configuration
+  base_config:
+    version: "v1"
+    protocol: "https"
+    content_type: "application/json"
+    timeout_seconds: 30
+    retry_attempts: 3
+    retry_backoff_seconds: 5
+    
+  # Authentication configuration
+  authentication:
+    method: "jwt"
+    token_header: "X-QMS-Token"
+    signature_header: "X-QMS-Signature"
+    algorithm: "HS256"
+    secret_env_var: "QMS_WEBHOOK_SECRET"
+    
+  # Rate limiting
+  rate_limiting:
+    requests_per_minute: 100
+    burst_limit: 20
+    
+  # Security headers
+  security_headers:
+    - "X-Content-Type-Options: nosniff"
+    - "X-Frame-Options: DENY"
+    - "X-XSS-Protection: 1; mode=block"
+    - "Strict-Transport-Security: max-age=31536000"
+
+# =============================================================================
+# QMS STEP-SPECIFIC WEBHOOK ENDPOINTS
+# =============================================================================
+
+# Step 1: Definition of Ready (DoR) Validation
+dor_webhooks:
+  # DoR validation result webhook
+  dor_validation_result:
+    endpoint: "/webhooks/qms/dor/validation-result"
+    method: "POST"
+    description: "Receives DoR validation results from external tools"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      validation_status: "enum[passed, failed, warning]"
+      checks:
+        - check_name: "string"
+          status: "enum[passed, failed, skipped, warning]"
+          message: "string"
+          details_url: "string (optional)"
+      metadata:
+        tool_name: "string"
+        tool_version: "string"
+        timestamp: "iso8601"
+        execution_time_ms: "integer"
+    github_actions:
+      - name: "Update PR Status"
+        uses: "./.github/actions/qms-status-update"
+        parameters:
+          step: "dor"
+          status: "${{ payload.validation_status }}"
+          checks: "${{ payload.checks }}"
+      - name: "Update Labels"
+        uses: "./.github/actions/qms-label-manager"
+        parameters:
+          action: "update_dor_status"
+          status: "${{ payload.validation_status }}"
+      - name: "Post Comment"
+        uses: "./.github/actions/qms-comment-manager"
+        parameters:
+          template: "dor_validation_result"
+          data: "${{ payload }}"
+
+  # DoR bypass request webhook
+  dor_bypass_request:
+    endpoint: "/webhooks/qms/dor/bypass-request"
+    method: "POST"
+    description: "Handles DoR bypass requests from authorized users"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      requested_by: "string"
+      bypass_reason: "string"
+      failed_checks: "array[string]"
+      approver_required: "boolean"
+    github_actions:
+      - name: "Validate Bypass Authority"
+        uses: "./.github/actions/qms-bypass-validator"
+        parameters:
+          step: "dor"
+          requester: "${{ payload.requested_by }}"
+      - name: "Create Bypass Issue"
+        uses: "./.github/actions/create-bypass-issue"
+        parameters:
+          template: "dor_bypass_template"
+          data: "${{ payload }}"
+
+# Step 2: Progress Review Webhooks
+progress_review_webhooks:
+  # Progress update webhook
+  progress_update:
+    endpoint: "/webhooks/qms/progress/update"
+    method: "POST"
+    description: "Receives progress updates from development tools"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      progress_status: "enum[on_track, at_risk, blocked, completed]"
+      completion_percentage: "integer (0-100)"
+      milestones:
+        - name: "string"
+          status: "enum[pending, in_progress, completed, blocked]"
+          due_date: "iso8601 (optional)"
+          completed_date: "iso8601 (optional)"
+      blockers:
+        - title: "string"
+          description: "string"
+          severity: "enum[low, medium, high, critical]"
+          assignee: "string (optional)"
+      metrics:
+        commits_count: "integer"
+        files_changed: "integer"
+        lines_added: "integer"
+        lines_removed: "integer"
+        test_coverage_change: "float"
+    github_actions:
+      - name: "Update Progress Tracking"
+        uses: "./.github/actions/qms-progress-tracker"
+        parameters:
+          data: "${{ payload }}"
+      - name: "Update Project Board"
+        uses: "./.github/actions/update-project-board"
+        parameters:
+          pr_number: "${{ payload.pr_number }}"
+          status: "${{ payload.progress_status }}"
+          completion: "${{ payload.completion_percentage }}"
+
+  # Risk assessment webhook
+  risk_assessment:
+    endpoint: "/webhooks/qms/progress/risk-assessment"
+    method: "POST"
+    description: "Receives risk assessment updates from monitoring tools"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      risk_level: "enum[low, medium, high, critical]"
+      risk_factors:
+        - category: "string"
+          description: "string"
+          impact: "enum[low, medium, high]"
+          probability: "enum[low, medium, high]"
+          mitigation_plan: "string (optional)"
+      recommendations:
+        - action: "string"
+          priority: "enum[low, medium, high]"
+          due_date: "iso8601 (optional)"
+    github_actions:
+      - name: "Update Risk Labels"
+        uses: "./.github/actions/qms-label-manager"
+        parameters:
+          action: "update_risk_level"
+          level: "${{ payload.risk_level }}"
+      - name: "Notify Stakeholders"
+        uses: "./.github/actions/qms-notification"
+        parameters:
+          template: "risk_assessment_alert"
+          recipients: "risk_management_team"
+          data: "${{ payload }}"
+
+# Step 3: Definition of Done (DoD) Validation
+dod_webhooks:
+  # DoD validation result webhook
+  dod_validation_result:
+    endpoint: "/webhooks/qms/dod/validation-result"
+    method: "POST"
+    description: "Receives DoD validation results from external tools"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      validation_status: "enum[passed, failed, warning]"
+      categories:
+        - category: "enum[code_quality, security, performance, documentation, testing]"
+          status: "enum[passed, failed, warning]"
+          checks:
+            - name: "string"
+              status: "enum[passed, failed, skipped, warning]"
+              score: "float (optional)"
+              threshold: "float (optional)"
+              message: "string"
+              details_url: "string (optional)"
+      overall_score: "float (optional)"
+      minimum_score: "float (optional)"
+      metadata:
+        tool_name: "string"
+        tool_version: "string"
+        timestamp: "iso8601"
+        execution_time_ms: "integer"
+    github_actions:
+      - name: "Update DoD Status"
+        uses: "./.github/actions/qms-status-update"
+        parameters:
+          step: "dod"
+          status: "${{ payload.validation_status }}"
+          categories: "${{ payload.categories }}"
+      - name: "Generate DoD Report"
+        uses: "./.github/actions/generate-dod-report"
+        parameters:
+          data: "${{ payload }}"
+          format: "markdown"
+      - name: "Update Merge Readiness"
+        uses: "./.github/actions/qms-merge-gate"
+        parameters:
+          pr_number: "${{ payload.pr_number }}"
+          dod_status: "${{ payload.validation_status }}"
+
+  # Performance test results webhook
+  performance_test_results:
+    endpoint: "/webhooks/qms/dod/performance-results"
+    method: "POST"
+    description: "Receives performance test results"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      test_suite: "string"
+      overall_status: "enum[passed, failed, warning]"
+      metrics:
+        response_time_p95: "float"
+        response_time_p99: "float"
+        throughput_rps: "float"
+        memory_usage_mb: "float"
+        cpu_usage_percent: "float"
+      baseline_comparison:
+        response_time_change_percent: "float"
+        throughput_change_percent: "float"
+        memory_change_percent: "float"
+      test_results:
+        - test_name: "string"
+          status: "enum[passed, failed, warning]"
+          duration_ms: "integer"
+          assertions_passed: "integer"
+          assertions_failed: "integer"
+    github_actions:
+      - name: "Update Performance Status"
+        uses: "./.github/actions/qms-performance-tracker"
+        parameters:
+          results: "${{ payload }}"
+      - name: "Compare Baseline"
+        uses: "./.github/actions/performance-baseline-comparison"
+        parameters:
+          current_results: "${{ payload.metrics }}"
+          comparison: "${{ payload.baseline_comparison }}"
+
+# Step 4: Final QMS Review
+qms_review_webhooks:
+  # QMS review completion webhook
+  qms_review_completion:
+    endpoint: "/webhooks/qms/review/completion"
+    method: "POST"
+    description: "Receives final QMS review completion notification"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      review_status: "enum[approved, rejected, conditional]"
+      reviewer: "string"
+      review_date: "iso8601"
+      conditions:
+        - description: "string"
+          severity: "enum[minor, major, critical]"
+          due_date: "iso8601 (optional)"
+      compliance_score: "float (optional)"
+      quality_gates_summary:
+        dor_status: "enum[passed, failed, bypassed]"
+        progress_status: "enum[completed, on_track, at_risk]"
+        dod_status: "enum[passed, failed, conditional]"
+        final_review: "enum[approved, rejected, conditional]"
+      artifacts:
+        - name: "string"
+          type: "enum[report, certificate, documentation]"
+          url: "string"
+    github_actions:
+      - name: "Finalize QMS Status"
+        uses: "./.github/actions/qms-finalize"
+        parameters:
+          review_data: "${{ payload }}"
+      - name: "Update Merge Gate"
+        uses: "./.github/actions/qms-merge-gate"
+        parameters:
+          pr_number: "${{ payload.pr_number }}"
+          final_status: "${{ payload.review_status }}"
+      - name: "Generate Completion Certificate"
+        uses: "./.github/actions/generate-qms-certificate"
+        parameters:
+          pr_data: "${{ payload }}"
+          template: "qms_completion_certificate"
+
+  # Compliance audit webhook
+  compliance_audit:
+    endpoint: "/webhooks/qms/review/compliance-audit"
+    method: "POST"
+    description: "Receives compliance audit results"
+    payload_schema:
+      pr_number: "integer"
+      repository: "string"
+      audit_id: "string"
+      audit_date: "iso8601"
+      auditor: "string"
+      compliance_framework: "string"
+      overall_compliance: "enum[compliant, non_compliant, conditional]"
+      sections:
+        - section_name: "string"
+          requirements:
+            - requirement_id: "string"
+              description: "string"
+              status: "enum[met, not_met, partially_met, not_applicable]"
+              evidence: "string (optional)"
+              notes: "string (optional)"
+      recommendations:
+        - priority: "enum[low, medium, high, critical]"
+          description: "string"
+          remediation_plan: "string (optional)"
+    github_actions:
+      - name: "Update Compliance Status"
+        uses: "./.github/actions/qms-compliance-tracker"
+        parameters:
+          audit_results: "${{ payload }}"
+      - name: "Generate Compliance Report"
+        uses: "./.github/actions/generate-compliance-report"
+        parameters:
+          audit_data: "${{ payload }}"
+
+# =============================================================================
+# WEBHOOK EVENT HANDLERS
+# =============================================================================
+
+event_handlers:
+  # GitHub event processing
+  github_events:
+    pull_request_opened:
+      triggers:
+        - webhook: "dor_webhooks.dor_validation_result"
+          condition: "auto_validation_enabled"
+          delay_seconds: 30
+    
+    pull_request_synchronize:
+      triggers:
+        - webhook: "dod_webhooks.dod_validation_result"
+          condition: "pr_ready_for_dod"
+          delay_seconds: 60
+    
+    pull_request_review_submitted:
+      triggers:
+        - webhook: "qms_review_webhooks.qms_review_completion"
+          condition: "review_type == 'qms_final'"
+          delay_seconds: 0
+
+  # External tool integrations
+  external_integrations:
+    sonarqube:
+      webhook_url: "${SONARQUBE_WEBHOOK_URL}"
+      events: ["quality_gate_status", "security_hotspots"]
+      mapping:
+        quality_gate_status: "dod_webhooks.dod_validation_result"
+        security_hotspots: "dod_webhooks.dod_validation_result"
+    
+    jira:
+      webhook_url: "${JIRA_WEBHOOK_URL}"
+      events: ["issue_updated", "sprint_completed"]
+      mapping:
+        issue_updated: "progress_review_webhooks.progress_update"
+        sprint_completed: "progress_review_webhooks.progress_update"
+    
+    datadog:
+      webhook_url: "${DATADOG_WEBHOOK_URL}"
+      events: ["monitor_alert", "performance_anomaly"]
+      mapping:
+        monitor_alert: "progress_review_webhooks.risk_assessment"
+        performance_anomaly: "dod_webhooks.performance_test_results"
+
+# =============================================================================
+# WEBHOOK PAYLOAD VALIDATION
+# =============================================================================
+
+payload_validation:
+  # JSON schema validation
+  json_schema_validation: true
+  max_payload_size_mb: 10
+  required_fields_validation: true
+  
+  # Custom validation rules
+  custom_validators:
+    pr_number_exists:
+      description: "Validates PR number exists in repository"
+      implementation: "github_api_check"
+    
+    user_authorization:
+      description: "Validates user has required permissions"
+      implementation: "github_permissions_check"
+    
+    rate_limit_check:
+      description: "Validates rate limiting rules"
+      implementation: "redis_rate_limiter"
+
+# =============================================================================
+# ERROR HANDLING AND MONITORING
+# =============================================================================
+
+error_handling:
+  # Retry configuration
+  retry_policy:
+    max_retries: 3
+    backoff_strategy: "exponential"
+    base_delay_seconds: 2
+    max_delay_seconds: 60
+    jitter: true
+  
+  # Dead letter queue
+  dead_letter_queue:
+    enabled: true
+    retention_days: 7
+    alert_threshold: 10
+  
+  # Error notifications
+  error_notifications:
+    slack_webhook: "${SLACK_ERROR_WEBHOOK_URL}"
+    email_recipients: ["qms-team@company.com"]
+    severity_threshold: "medium"
+
+# Monitoring and metrics
+monitoring:
+  # Metrics collection
+  metrics:
+    - name: "webhook_requests_total"
+      type: "counter"
+      labels: ["endpoint", "status", "tool"]
+    - name: "webhook_response_time"
+      type: "histogram"
+      labels: ["endpoint"]
+    - name: "webhook_payload_size"
+      type: "histogram"
+      labels: ["endpoint"]
+  
+  # Health checks
+  health_checks:
+    - endpoint: "/health/webhooks"
+      interval_seconds: 30
+      timeout_seconds: 5
+    - endpoint: "/health/database"
+      interval_seconds: 60
+      timeout_seconds: 10
+  
+  # Alerting
+  alerts:
+    - name: "high_webhook_error_rate"
+      condition: "error_rate > 0.05"
+      duration: "5m"
+      severity: "warning"
+    - name: "webhook_endpoint_down"
+      condition: "up == 0"
+      duration: "1m"
+      severity: "critical"
+
+# =============================================================================
+# DOCUMENTATION AND EXAMPLES
+# =============================================================================
+
+documentation:
+  # API documentation
+  openapi_spec: "/docs/qms-webhook-api.yaml"
+  postman_collection: "/docs/qms-webhook-postman.json"
+  
+  # Integration guides
+  integration_guides:
+    - title: "Integrating SonarQube with QMS Webhooks"
+      file: "/docs/integrations/sonarqube-integration.md"
+    - title: "Setting up JIRA Integration"
+      file: "/docs/integrations/jira-integration.md"
+    - title: "Custom Tool Integration Guide"
+      file: "/docs/integrations/custom-tool-guide.md"
+  
+  # Example payloads
+  example_payloads:
+    dor_validation_success: |
+      {
+        "pr_number": 123,
+        "repository": "company/my-app",
+        "validation_status": "passed",
+        "checks": [
+          {
+            "check_name": "branch_naming_convention",
+            "status": "passed",
+            "message": "Branch follows naming convention"
+          },
+          {
+            "check_name": "jira_ticket_linked",
+            "status": "passed",
+            "message": "JIRA-123 linked successfully",
+            "details_url": "https://jira.company.com/browse/JIRA-123"
+          }
+        ],
+        "metadata": {
+          "tool_name": "QMS-DoR-Validator",
+          "tool_version": "1.2.0",
+          "timestamp": "2024-01-15T10:30:00Z",
+          "execution_time_ms": 1500
+        }
+      }
+    
+    dod_validation_with_warnings: |
+      {
+        "pr_number": 123,
+        "repository": "company/my-app",
+        "validation_status": "warning",
+        "categories": [
+          {
+            "category": "code_quality",
+            "status": "passed",
+            "checks": [
+              {
+                "name": "sonarqube_quality_gate",
+                "status": "passed",
+                "score": 95.0,
+                "threshold": 85.0,
+                "message": "Code quality meets standards"
+              }
+            ]
+          },
+          {
+            "category": "security",
+            "status": "warning",
+            "checks": [
+              {
+                "name": "security_scan",
+                "status": "warning",
+                "message": "2 low-severity issues found",
+                "details_url": "https://security-scan.company.com/report/123"
+              }
+            ]
+          }
+        ],
+        "overall_score": 88.5,
+        "minimum_score": 80.0,
+        "metadata": {
+          "tool_name": "QMS-DoD-Validator",
+          "tool_version": "2.1.0",
+          "timestamp": "2024-01-15T14:45:00Z",
+          "execution_time_ms": 30000
+        }
+      }
+
+# =============================================================================
+# DEPLOYMENT AND INFRASTRUCTURE
+# =============================================================================
+
+deployment:
+  # Container configuration
+  container:
+    image: "qms-webhook-handler:latest"
+    port: 8080
+    replicas: 3
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+  
+  # Environment variables
+  environment_variables:
+    - name: "QMS_WEBHOOK_SECRET"
+      from_secret: "qms-webhook-secret"
+    - name: "GITHUB_TOKEN"
+      from_secret: "github-token"
+    - name: "DATABASE_URL"
+      from_secret: "database-url"
+    - name: "REDIS_URL"
+      from_secret: "redis-url"
+  
+  # Service configuration
+  service:
+    type: "ClusterIP"
+    port: 80
+    target_port: 8080
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: "qms-webhooks.company.com"
+        paths:
+          - path: "/webhooks"
+            pathType: "Prefix"
+    tls:
+      - secretName: "qms-webhooks-tls"
+        hosts:
+          - "qms-webhooks.company.com"
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+
+security:
+  # Authentication methods
+  authentication_methods:
+    jwt:
+      enabled: true
+      issuer: "qms-system"
+      audience: "qms-webhooks"
+      leeway_seconds: 30
+    
+    api_key:
+      enabled: true
+      header_name: "X-API-Key"
+      key_rotation_days: 90
+    
+    github_signature:
+      enabled: true
+      signature_header: "X-Hub-Signature-256"
+      algorithm: "sha256"
+  
+  # IP whitelist
+  ip_whitelist:
+    enabled: true
+    allowed_cidrs:
+      - "10.0.0.0/8"      # Internal network
+      - "192.168.0.0/16"  # Internal network
+      - "140.82.112.0/20" # GitHub webhooks
+  
+  # Content security
+  content_security:
+    max_payload_size: "10MB"
+    allowed_content_types:
+      - "application/json"
+      - "application/x-www-form-urlencoded"
+    sanitize_input: true
+    validate_json_schema: true
+  
+  # Audit logging
+  audit_logging:
+    enabled: true
+    log_level: "INFO"
+    include_payload: false  # For security
+    include_headers: true
+    retention_days: 90
+
+# Configuration validation
+validation:
+  required_environment_variables:
+    - "QMS_WEBHOOK_SECRET"
+    - "GITHUB_TOKEN"
+    - "DATABASE_URL"
+  
+  startup_checks:
+    - name: "Database connectivity"
+      type: "database_ping"
+      timeout_seconds: 10
+    - name: "GitHub API access"
+      type: "github_api_test"
+      timeout_seconds: 5
+    - name: "Redis connectivity"
+      type: "redis_ping"
+      timeout_seconds: 5

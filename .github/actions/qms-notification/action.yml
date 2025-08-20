@@ -1,0 +1,578 @@
+name: 'QMS Notification'
+description: 'Send notifications about QMS workflow results via multiple channels'
+branding:
+  icon: 'bell'
+  color: 'orange'
+
+inputs:
+  notification-type:
+    description: 'Type of notification (slack, email, teams, webhook, github-issue)'
+    required: true
+  workflow-status:
+    description: 'Overall workflow status (success, failure, warning)'
+    required: true
+  workflow-name:
+    description: 'Name of the workflow generating the notification'
+    required: true
+  results-summary:
+    description: 'Summary of the workflow results'
+    required: true
+  # Slack Configuration
+  slack-webhook-url:
+    description: 'Slack webhook URL for notifications'
+    required: false
+  slack-channel:
+    description: 'Slack channel to post to'
+    required: false
+    default: '#qms-alerts'
+  # Email Configuration
+  smtp-server:
+    description: 'SMTP server for email notifications'
+    required: false
+  smtp-username:
+    description: 'SMTP username'
+    required: false
+  smtp-password:
+    description: 'SMTP password'
+    required: false
+  email-recipients:
+    description: 'Comma-separated list of email recipients'
+    required: false
+  # Teams Configuration
+  teams-webhook-url:
+    description: 'Microsoft Teams webhook URL'
+    required: false
+  # GitHub Issue Configuration
+  github-token:
+    description: 'GitHub token for creating issues'
+    required: false
+  issue-repository:
+    description: 'Repository to create issues in (format: owner/repo)'
+    required: false
+    default: ${{ github.repository }}
+  issue-labels:
+    description: 'Comma-separated list of labels for GitHub issues'
+    required: false
+    default: 'qms,quality-gate'
+  # General Configuration
+  severity-level:
+    description: 'Notification severity (low, medium, high, critical)'
+    required: false
+    default: 'medium'
+  include-artifacts:
+    description: 'Include links to workflow artifacts'
+    required: false
+    default: 'true'
+  mention-users:
+    description: 'Users to mention in notifications (comma-separated)'
+    required: false
+  suppress-success:
+    description: 'Skip notifications for successful workflows'
+    required: false
+    default: 'false'
+
+outputs:
+  notification-status:
+    description: 'Status of the notification delivery (sent, failed, skipped)'
+    value: ${{ steps.send.outputs.status }}
+  notification-id:
+    description: 'Unique identifier for the sent notification'
+    value: ${{ steps.send.outputs.notification-id }}
+  recipients-count:
+    description: 'Number of recipients the notification was sent to'
+    value: ${{ steps.send.outputs.recipients-count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Configuration
+      shell: bash
+      run: |
+        echo "🔍 Validating notification configuration..."
+        
+        # Validate notification type
+        case "${{ inputs.notification-type }}" in
+          "slack"|"email"|"teams"|"webhook"|"github-issue")
+            echo "✅ Valid notification type: ${{ inputs.notification-type }}"
+            ;;
+          *)
+            echo "❌ Invalid notification type: ${{ inputs.notification-type }}"
+            echo "Valid options: slack, email, teams, webhook, github-issue"
+            exit 1
+            ;;
+        esac
+        
+        # Validate workflow status
+        case "${{ inputs.workflow-status }}" in
+          "success"|"failure"|"warning")
+            echo "✅ Valid workflow status: ${{ inputs.workflow-status }}"
+            ;;
+          *)
+            echo "❌ Invalid workflow status: ${{ inputs.workflow-status }}"
+            echo "Valid options: success, failure, warning"
+            exit 1
+            ;;
+        esac
+        
+        # Check if success notifications should be suppressed
+        if [[ "${{ inputs.workflow-status }}" == "success" && "${{ inputs.suppress-success }}" == "true" ]]; then
+          echo "ℹ️ Success notifications suppressed - skipping"
+          echo "SKIP_NOTIFICATION=true" >> $GITHUB_ENV
+        fi
+        
+        echo "✅ Configuration validation completed"
+
+    - name: Setup Python for Notifications
+      if: env.SKIP_NOTIFICATION != 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Notification Dependencies
+      if: env.SKIP_NOTIFICATION != 'true'
+      shell: bash
+      run: |
+        echo "📦 Installing notification dependencies..."
+        pip install --quiet --upgrade pip
+        pip install --quiet requests python-dateutil jinja2 smtplib email-validator
+
+    - name: Prepare Notification Content
+      if: env.SKIP_NOTIFICATION != 'true'
+      shell: bash
+      run: |
+        echo "📝 Preparing notification content..."
+        
+        # Create notification directory
+        mkdir -p /tmp/qms-notifications
+        
+        # Generate notification content script
+        cat > /tmp/qms-notifications/prepare_content.py << 'EOF'
+        import json
+        import os
+        from datetime import datetime, timezone
+        
+        def get_status_emoji(status):
+            return {
+                'success': '✅',
+                'failure': '❌', 
+                'warning': '⚠️'
+            }.get(status, '❓')
+        
+        def get_status_color(status):
+            return {
+                'success': '#36a64f',  # Green
+                'failure': '#dc3545',  # Red
+                'warning': '#ffc107'   # Yellow
+            }.get(status, '#6c757d')  # Gray
+        
+        def get_priority_level(severity, status):
+            if status == 'failure':
+                return 'high'
+            elif status == 'warning':
+                return 'medium'
+            else:
+                return severity
+        
+        def prepare_slack_content():
+            emoji = get_status_emoji(os.environ.get('WORKFLOW_STATUS'))
+            color = get_status_color(os.environ.get('WORKFLOW_STATUS'))
+            
+            content = {
+                "text": f"{emoji} QMS Workflow Alert",
+                "attachments": [{
+                    "color": color,
+                    "blocks": [
+                        {
+                            "type": "header",
+                            "text": {
+                                "type": "plain_text",
+                                "text": f"{emoji} QMS: {os.environ.get('WORKFLOW_NAME')}"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Status:* {os.environ.get('WORKFLOW_STATUS').upper()}"
+                                },
+                                {
+                                    "type": "mrkdwn", 
+                                    "text": f"*Repository:* {os.environ.get('GITHUB_REPOSITORY')}"
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Branch:* {os.environ.get('GITHUB_REF_NAME')}"
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Triggered by:* {os.environ.get('GITHUB_ACTOR')}"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"*Summary:* {os.environ.get('RESULTS_SUMMARY')}"
+                            }
+                        },
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "View Workflow"
+                                    },
+                                    "url": f"https://github.com/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+                                }
+                            ]
+                        }
+                    ]
+                }]
+            }
+            
+            # Add mentions if specified
+            mentions = os.environ.get('MENTION_USERS', '')
+            if mentions:
+                mention_text = ' '.join([f"<@{user.strip()}>" for user in mentions.split(',') if user.strip()])
+                content["text"] += f" {mention_text}"
+            
+            return content
+        
+        def prepare_teams_content():
+            emoji = get_status_emoji(os.environ.get('WORKFLOW_STATUS'))
+            color = get_status_color(os.environ.get('WORKFLOW_STATUS'))
+            
+            content = {
+                "@type": "MessageCard",
+                "@context": "https://schema.org/extensions",
+                "summary": f"QMS Workflow Alert: {os.environ.get('WORKFLOW_NAME')}",
+                "themeColor": color.replace('#', ''),
+                "sections": [{
+                    "activityTitle": f"{emoji} QMS Workflow Alert",
+                    "activitySubtitle": f"Workflow: {os.environ.get('WORKFLOW_NAME')}",
+                    "facts": [
+                        {
+                            "name": "Status",
+                            "value": os.environ.get('WORKFLOW_STATUS').upper()
+                        },
+                        {
+                            "name": "Repository", 
+                            "value": os.environ.get('GITHUB_REPOSITORY')
+                        },
+                        {
+                            "name": "Branch",
+                            "value": os.environ.get('GITHUB_REF_NAME')
+                        },
+                        {
+                            "name": "Triggered by",
+                            "value": os.environ.get('GITHUB_ACTOR')
+                        }
+                    ],
+                    "text": os.environ.get('RESULTS_SUMMARY')
+                }],
+                "potentialAction": [{
+                    "@type": "OpenUri",
+                    "name": "View Workflow",
+                    "targets": [{
+                        "os": "default",
+                        "uri": f"https://github.com/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}"
+                    }]
+                }]
+            }
+            
+            return content
+        
+        def prepare_email_content():
+            emoji = get_status_emoji(os.environ.get('WORKFLOW_STATUS'))
+            status = os.environ.get('WORKFLOW_STATUS').upper()
+            
+            subject = f"{emoji} QMS Alert: {os.environ.get('WORKFLOW_NAME')} - {status}"
+            
+            html_body = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: {get_status_color(os.environ.get('WORKFLOW_STATUS'))};">
+                        {emoji} QMS Workflow Alert
+                    </h2>
+                    
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <h3>Workflow Details</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li><strong>Workflow:</strong> {os.environ.get('WORKFLOW_NAME')}</li>
+                            <li><strong>Status:</strong> <span style="color: {get_status_color(os.environ.get('WORKFLOW_STATUS'))};">{status}</span></li>
+                            <li><strong>Repository:</strong> {os.environ.get('GITHUB_REPOSITORY')}</li>
+                            <li><strong>Branch:</strong> {os.environ.get('GITHUB_REF_NAME')}</li>
+                            <li><strong>Triggered by:</strong> {os.environ.get('GITHUB_ACTOR')}</li>
+                            <li><strong>Run ID:</strong> {os.environ.get('GITHUB_RUN_ID')}</li>
+                        </ul>
+                    </div>
+                    
+                    <div style="background: #ffffff; padding: 15px; border-left: 4px solid {get_status_color(os.environ.get('WORKFLOW_STATUS'))}; margin: 20px 0;">
+                        <h3>Summary</h3>
+                        <p>{os.environ.get('RESULTS_SUMMARY')}</p>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://github.com/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}" 
+                           style="display: inline-block; padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">
+                            View Workflow Details
+                        </a>
+                    </div>
+                    
+                    <div style="font-size: 12px; color: #6c757d; text-align: center; margin-top: 30px;">
+                        <p>This is an automated message from the QMS system.</p>
+                        <p>Timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            return {
+                "subject": subject,
+                "html": html_body
+            }
+        
+        def prepare_github_issue_content():
+            emoji = get_status_emoji(os.environ.get('WORKFLOW_STATUS'))
+            status = os.environ.get('WORKFLOW_STATUS')
+            
+            title = f"{emoji} QMS Alert: {os.environ.get('WORKFLOW_NAME')} - {status.upper()}"
+            
+            body = f"""## {emoji} QMS Workflow Alert
+
+**Workflow:** {os.environ.get('WORKFLOW_NAME')}
+**Status:** {status.upper()}
+**Repository:** {os.environ.get('GITHUB_REPOSITORY')}
+**Branch:** {os.environ.get('GITHUB_REF_NAME')}
+**Triggered by:** @{os.environ.get('GITHUB_ACTOR')}
+**Run ID:** {os.environ.get('GITHUB_RUN_ID')}
+
+### Summary
+{os.environ.get('RESULTS_SUMMARY')}
+
+### Links
+- [View Workflow Run](https://github.com/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')})
+- [View Repository](https://github.com/{os.environ.get('GITHUB_REPOSITORY')})
+
+---
+*This issue was automatically created by the QMS notification system.*
+"""
+            
+            return {
+                "title": title,
+                "body": body,
+                "labels": os.environ.get('ISSUE_LABELS', 'qms,quality-gate').split(',')
+            }
+        
+        # Generate content based on notification type
+        notification_type = os.environ.get('NOTIFICATION_TYPE')
+        
+        if notification_type == 'slack':
+            content = prepare_slack_content()
+        elif notification_type == 'teams':
+            content = prepare_teams_content()
+        elif notification_type == 'email':
+            content = prepare_email_content()
+        elif notification_type == 'github-issue':
+            content = prepare_github_issue_content()
+        else:
+            content = {"error": f"Unsupported notification type: {notification_type}"}
+        
+        # Save content to file
+        with open('/tmp/qms-notifications/content.json', 'w') as f:
+            json.dump(content, f, indent=2)
+        
+        print("✅ Notification content prepared")
+        EOF
+        
+        # Set environment variables for content generation
+        export WORKFLOW_STATUS='${{ inputs.workflow-status }}'
+        export WORKFLOW_NAME='${{ inputs.workflow-name }}'
+        export RESULTS_SUMMARY='${{ inputs.results-summary }}'
+        export NOTIFICATION_TYPE='${{ inputs.notification-type }}'
+        export MENTION_USERS='${{ inputs.mention-users }}'
+        export ISSUE_LABELS='${{ inputs.issue-labels }}'
+        
+        # Generate content
+        python3 /tmp/qms-notifications/prepare_content.py
+        
+        echo "✅ Notification content prepared"
+
+    - name: Send Notification
+      id: send
+      if: env.SKIP_NOTIFICATION != 'true'
+      shell: bash
+      run: |
+        echo "📤 Sending QMS notification..."
+        
+        # Create notification sender script
+        cat > /tmp/qms-notifications/send_notification.py << 'EOF'
+        import json
+        import requests
+        import smtplib
+        import os
+        import sys
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from datetime import datetime
+        import uuid
+        
+        def send_slack_notification(content, webhook_url):
+            try:
+                response = requests.post(webhook_url, json=content, timeout=30)
+                response.raise_for_status()
+                return True, response.json().get('ts', str(uuid.uuid4()))
+            except Exception as e:
+                print(f"❌ Slack notification failed: {e}")
+                return False, None
+        
+        def send_teams_notification(content, webhook_url):
+            try:
+                response = requests.post(webhook_url, json=content, timeout=30)
+                response.raise_for_status()
+                return True, str(uuid.uuid4())
+            except Exception as e:
+                print(f"❌ Teams notification failed: {e}")
+                return False, None
+        
+        def send_email_notification(content, smtp_config):
+            try:
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = content['subject']
+                msg['From'] = smtp_config['username']
+                msg['To'] = smtp_config['recipients']
+                
+                html_part = MIMEText(content['html'], 'html')
+                msg.attach(html_part)
+                
+                with smtplib.SMTP(smtp_config['server'], 587) as server:
+                    server.starttls()
+                    server.login(smtp_config['username'], smtp_config['password'])
+                    server.send_message(msg)
+                
+                return True, str(uuid.uuid4())
+            except Exception as e:
+                print(f"❌ Email notification failed: {e}")
+                return False, None
+        
+        def create_github_issue(content, github_config):
+            try:
+                headers = {
+                    'Authorization': f'token {github_config["token"]}',
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+                
+                issue_data = {
+                    'title': content['title'],
+                    'body': content['body'],
+                    'labels': content['labels']
+                }
+                
+                url = f"https://api.github.com/repos/{github_config['repository']}/issues"
+                response = requests.post(url, json=issue_data, headers=headers, timeout=30)
+                response.raise_for_status()
+                
+                issue = response.json()
+                return True, str(issue['number'])
+            except Exception as e:
+                print(f"❌ GitHub issue creation failed: {e}")
+                return False, None
+        
+        # Load prepared content
+        with open('/tmp/qms-notifications/content.json', 'r') as f:
+            content = json.load(f)
+        
+        notification_type = os.environ.get('NOTIFICATION_TYPE')
+        success = False
+        notification_id = None
+        recipients_count = 0
+        
+        if notification_type == 'slack':
+            webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
+            if webhook_url:
+                success, notification_id = send_slack_notification(content, webhook_url)
+                recipients_count = 1 if success else 0
+            else:
+                print("❌ Slack webhook URL not provided")
+        
+        elif notification_type == 'teams':
+            webhook_url = os.environ.get('TEAMS_WEBHOOK_URL')
+            if webhook_url:
+                success, notification_id = send_teams_notification(content, webhook_url)
+                recipients_count = 1 if success else 0
+            else:
+                print("❌ Teams webhook URL not provided")
+        
+        elif notification_type == 'email':
+            smtp_config = {
+                'server': os.environ.get('SMTP_SERVER'),
+                'username': os.environ.get('SMTP_USERNAME'),
+                'password': os.environ.get('SMTP_PASSWORD'),
+                'recipients': os.environ.get('EMAIL_RECIPIENTS')
+            }
+            if all(smtp_config.values()):
+                success, notification_id = send_email_notification(content, smtp_config)
+                recipients_count = len(smtp_config['recipients'].split(',')) if success else 0
+            else:
+                print("❌ SMTP configuration incomplete")
+        
+        elif notification_type == 'github-issue':
+            github_config = {
+                'token': os.environ.get('GITHUB_TOKEN'),
+                'repository': os.environ.get('ISSUE_REPOSITORY')
+            }
+            if all(github_config.values()):
+                success, notification_id = create_github_issue(content, github_config)
+                recipients_count = 1 if success else 0
+            else:
+                print("❌ GitHub configuration incomplete")
+        
+        # Output results
+        status = 'sent' if success else 'failed'
+        print(f"status={status}")
+        print(f"notification-id={notification_id or 'none'}")
+        print(f"recipients-count={recipients_count}")
+        
+        # Set GitHub Actions outputs
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"status={status}\n")
+            f.write(f"notification-id={notification_id or 'none'}\n")
+            f.write(f"recipients-count={recipients_count}\n")
+        
+        if success:
+            print(f"✅ Notification sent successfully (ID: {notification_id})")
+        else:
+            print("❌ Notification delivery failed")
+            sys.exit(1)
+        EOF
+        
+        # Set environment variables for sending
+        export NOTIFICATION_TYPE='${{ inputs.notification-type }}'
+        export SLACK_WEBHOOK_URL='${{ inputs.slack-webhook-url }}'
+        export TEAMS_WEBHOOK_URL='${{ inputs.teams-webhook-url }}'
+        export SMTP_SERVER='${{ inputs.smtp-server }}'
+        export SMTP_USERNAME='${{ inputs.smtp-username }}'
+        export SMTP_PASSWORD='${{ inputs.smtp-password }}'
+        export EMAIL_RECIPIENTS='${{ inputs.email-recipients }}'
+        export GITHUB_TOKEN='${{ inputs.github-token }}'
+        export ISSUE_REPOSITORY='${{ inputs.issue-repository }}'
+        
+        # Execute notification sender
+        python3 /tmp/qms-notifications/send_notification.py || true
+        
+        echo "📬 Notification process completed"
+
+    - name: Handle Skipped Notification
+      if: env.SKIP_NOTIFICATION == 'true'
+      shell: bash
+      run: |
+        echo "ℹ️ Notification skipped due to configuration"
+        echo "status=skipped" >> $GITHUB_OUTPUT
+        echo "notification-id=skipped" >> $GITHUB_OUTPUT
+        echo "recipients-count=0" >> $GITHUB_OUTPUT

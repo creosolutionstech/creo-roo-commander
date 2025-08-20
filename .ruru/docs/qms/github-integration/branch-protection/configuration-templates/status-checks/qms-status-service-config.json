@@ -1,0 +1,436 @@
+{
+  "$schema": "https://qms-schemas.internal/status-check-service-v1.schema.json",
+  "version": "1.0",
+  "service": {
+    "name": "qms-status-service",
+    "description": "QMS Status Check Service Configuration",
+    "version": "1.0.0",
+    "maintainer": {
+      "team": "DevOps",
+      "contact": "devops@company.com"
+    }
+  },
+  "endpoints": {
+    "base_url": "${QMS_SERVICE_BASE_URL:-https://qms-api.internal}",
+    "health_check": "/health",
+    "status_webhook": "/webhooks/github/status",
+    "pr_webhook": "/webhooks/github/pr",
+    "bypass_request": "/api/v1/bypass/request",
+    "bypass_status": "/api/v1/bypass/{request_id}/status"
+  },
+  "authentication": {
+    "type": "bearer",
+    "token_env": "QMS_SERVICE_TOKEN",
+    "github_token_env": "GITHUB_TOKEN",
+    "webhook_secret_env": "QMS_WEBHOOK_SECRET"
+  },
+  "repository_tiers": {
+    "mission_critical": {
+      "timeout_minutes": 30,
+      "retry_attempts": 3,
+      "required_checks": [
+        "qms/dor-validation",
+        "qms/security-scan-critical", 
+        "qms/security-scan-high",
+        "qms/code-quality-gate",
+        "qms/compliance-audit",
+        "qms/dod-validation"
+      ],
+      "optional_checks": [
+        "qms/performance-baseline",
+        "qms/accessibility-audit"
+      ],
+      "bypass_authorization": [
+        "qms-coordinator",
+        "technical-architect"
+      ]
+    },
+    "business_critical": {
+      "timeout_minutes": 20,
+      "retry_attempts": 2,
+      "required_checks": [
+        "qms/dor-validation",
+        "qms/security-scan-critical",
+        "qms/code-quality-gate", 
+        "qms/compliance-audit",
+        "qms/dod-validation"
+      ],
+      "optional_checks": [
+        "qms/security-scan-high",
+        "qms/performance-baseline"
+      ],
+      "bypass_authorization": [
+        "qms-coordinator",
+        "technical-architect",
+        "lead-devops"
+      ]
+    },
+    "standard": {
+      "timeout_minutes": 15,
+      "retry_attempts": 2,
+      "required_checks": [
+        "qms/dor-validation",
+        "qms/security-scan-critical",
+        "qms/code-quality-gate",
+        "qms/dod-validation"
+      ],
+      "optional_checks": [
+        "qms/compliance-audit"
+      ],
+      "bypass_authorization": [
+        "qms-coordinator",
+        "technical-architect", 
+        "lead-devops",
+        "lead-backend",
+        "lead-frontend"
+      ]
+    },
+    "experimental": {
+      "timeout_minutes": 10,
+      "retry_attempts": 1,
+      "required_checks": [
+        "qms/dor-validation",
+        "qms/code-quality-gate"
+      ],
+      "optional_checks": [
+        "qms/security-scan-critical"
+      ],
+      "bypass_authorization": [
+        "qms-coordinator",
+        "technical-architect",
+        "lead-devops",
+        "lead-backend", 
+        "lead-frontend",
+        "util-senior-dev"
+      ]
+    }
+  },
+  "status_checks": {
+    "qms/dor-validation": {
+      "name": "Definition of Ready Validation",
+      "description": "Validates PR meets Definition of Ready criteria",
+      "type": "synchronous",
+      "service_endpoint": "/api/v1/checks/dor",
+      "timeout_seconds": 120,
+      "parameters": {
+        "check_title_format": true,
+        "check_description_length": true,
+        "min_description_chars": 50,
+        "check_linked_issues": true,
+        "check_critical_files": true,
+        "critical_file_patterns": [
+          "package.json",
+          "Dockerfile", 
+          "docker-compose.yml",
+          ".github/workflows/",
+          "terraform/",
+          "k8s/",
+          "migrations/"
+        ]
+      }
+    },
+    "qms/security-scan-critical": {
+      "name": "Critical Security Scan",
+      "description": "Scans for critical security vulnerabilities",
+      "type": "asynchronous",
+      "service_endpoint": "/api/v1/checks/security/critical",
+      "timeout_seconds": 600,
+      "parameters": {
+        "scan_secrets": true,
+        "scan_dependencies": true,
+        "scan_code": true,
+        "max_critical_vulnerabilities": 0,
+        "tools": [
+          "gitleaks",
+          "semgrep",
+          "npm-audit",
+          "safety"
+        ]
+      }
+    },
+    "qms/security-scan-high": {
+      "name": "High Security Scan", 
+      "description": "Scans for high priority security issues",
+      "type": "asynchronous",
+      "service_endpoint": "/api/v1/checks/security/high",
+      "timeout_seconds": 300,
+      "parameters": {
+        "max_high_vulnerabilities": 5,
+        "include_medium_if_many": true,
+        "medium_threshold": 20
+      }
+    },
+    "qms/code-quality-gate": {
+      "name": "Code Quality Gate",
+      "description": "Validates code quality metrics and standards",
+      "type": "asynchronous", 
+      "service_endpoint": "/api/v1/checks/quality",
+      "timeout_seconds": 400,
+      "parameters": {
+        "min_test_coverage": {
+          "mission_critical": 90,
+          "business_critical": 80,
+          "standard": 70,
+          "experimental": 60
+        },
+        "max_eslint_errors": {
+          "mission_critical": 0,
+          "business_critical": 5,
+          "standard": 10,
+          "experimental": 20
+        },
+        "min_pylint_score": {
+          "mission_critical": 9.0,
+          "business_critical": 8.0,
+          "standard": 7.0,
+          "experimental": 6.0
+        },
+        "check_code_formatting": true,
+        "enforce_commit_standards": true
+      }
+    },
+    "qms/compliance-audit": {
+      "name": "Compliance Audit",
+      "description": "Validates regulatory and internal compliance requirements",
+      "type": "synchronous",
+      "service_endpoint": "/api/v1/checks/compliance",
+      "timeout_seconds": 180,
+      "parameters": {
+        "check_license_headers": true,
+        "check_required_files": true,
+        "check_commit_format": true,
+        "validate_api_changes": true,
+        "check_breaking_changes": true,
+        "required_files_by_tier": {
+          "mission_critical": [
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE",
+            ".github/CODEOWNERS",
+            "SECURITY.md"
+          ],
+          "business_critical": [
+            "README.md",
+            "CHANGELOG.md", 
+            "LICENSE",
+            ".github/CODEOWNERS"
+          ],
+          "standard": [
+            "README.md"
+          ],
+          "experimental": []
+        }
+      }
+    },
+    "qms/dod-validation": {
+      "name": "Definition of Done Validation",
+      "description": "Validates PR meets Definition of Done criteria",
+      "type": "synchronous",
+      "service_endpoint": "/api/v1/checks/dod",
+      "timeout_seconds": 60,
+      "parameters": {
+        "require_all_checks_passed": true,
+        "require_approvals": true,
+        "require_no_pending_changes": true,
+        "check_branch_updated": true,
+        "min_approval_count_by_tier": {
+          "mission_critical": 3,
+          "business_critical": 2,
+          "standard": 2,
+          "experimental": 1
+        }
+      }
+    },
+    "qms/performance-baseline": {
+      "name": "Performance Baseline Check",
+      "description": "Validates performance doesn't regress beyond baseline", 
+      "type": "asynchronous",
+      "service_endpoint": "/api/v1/checks/performance",
+      "timeout_seconds": 900,
+      "parameters": {
+        "max_regression_percent": 10,
+        "metrics": [
+          "response_time",
+          "memory_usage", 
+          "cpu_usage",
+          "bundle_size"
+        ],
+        "baseline_comparison": "main_branch"
+      }
+    },
+    "qms/accessibility-audit": {
+      "name": "Accessibility Audit",
+      "description": "Validates WCAG compliance and accessibility standards",
+      "type": "asynchronous",
+      "service_endpoint": "/api/v1/checks/accessibility", 
+      "timeout_seconds": 300,
+      "parameters": {
+        "wcag_level": "AA",
+        "check_color_contrast": true,
+        "check_keyboard_navigation": true,
+        "check_screen_reader": true,
+        "tools": [
+          "axe-core",
+          "pa11y"
+        ]
+      }
+    }
+  },
+  "webhooks": {
+    "github_events": [
+      "pull_request.opened",
+      "pull_request.synchronize", 
+      "pull_request.reopened",
+      "pull_request.ready_for_review",
+      "pull_request_review.submitted",
+      "pull_request_review.dismissed"
+    ],
+    "retry_policy": {
+      "max_retries": 3,
+      "initial_delay_seconds": 1,
+      "max_delay_seconds": 60,
+      "exponential_backoff": true
+    },
+    "security": {
+      "verify_signature": true,
+      "allowed_origins": [
+        "github.com",
+        "api.github.com"
+      ]
+    }
+  },
+  "bypass_procedures": {
+    "emergency_bypass": {
+      "enabled": true,
+      "approval_required": true,
+      "auto_expire_hours": 24,
+      "notification_channels": [
+        "slack://qms-alerts",
+        "email://qms-coordinators@company.com"
+      ]
+    },
+    "planned_bypass": {
+      "enabled": true,
+      "advance_notice_hours": 4,
+      "max_duration_hours": 168,
+      "require_justification": true,
+      "require_rollback_plan": true
+    },
+    "authorization_levels": {
+      "level_1": {
+        "roles": ["lead-*"],
+        "max_duration_hours": 2,
+        "auto_approve": false
+      },
+      "level_2": {
+        "roles": ["technical-architect"],
+        "max_duration_hours": 8, 
+        "auto_approve": false
+      },
+      "level_3": {
+        "roles": ["qms-coordinator"],
+        "max_duration_hours": 24,
+        "auto_approve": false
+      },
+      "emergency": {
+        "roles": ["roo-commander"],
+        "max_duration_hours": 4,
+        "auto_approve": true,
+        "require_post_mortem": true
+      }
+    }
+  },
+  "monitoring": {
+    "metrics": {
+      "enabled": true,
+      "endpoint": "/metrics",
+      "format": "prometheus"
+    },
+    "logging": {
+      "level": "${LOG_LEVEL:-INFO}",
+      "format": "json",
+      "include_request_id": true,
+      "audit_events": [
+        "status_check_started",
+        "status_check_completed", 
+        "status_check_failed",
+        "bypass_requested",
+        "bypass_approved",
+        "bypass_denied"
+      ]
+    },
+    "alerting": {
+      "channels": [
+        "slack://devops-alerts",
+        "pagerduty://qms-oncall"
+      ],
+      "alert_conditions": {
+        "high_failure_rate": {
+          "threshold": 0.1,
+          "window_minutes": 15
+        },
+        "check_timeout_rate": {
+          "threshold": 0.05,
+          "window_minutes": 30
+        },
+        "service_unavailable": {
+          "consecutive_failures": 3
+        }
+      }
+    }
+  },
+  "feature_flags": {
+    "async_status_updates": true,
+    "batch_check_processing": true,
+    "smart_retry_logic": true,
+    "bypass_auto_approval": false,
+    "performance_monitoring": true,
+    "detailed_error_reporting": true
+  },
+  "cache": {
+    "enabled": true,
+    "provider": "redis",
+    "connection_string": "${REDIS_URL:-redis://localhost:6379}",
+    "ttl_seconds": {
+      "status_check_results": 3600,
+      "repository_configs": 1800,
+      "user_permissions": 900
+    }
+  },
+  "database": {
+    "provider": "postgresql",
+    "connection_string": "${DATABASE_URL}",
+    "migrations": {
+      "auto_run": false,
+      "location": "./migrations"
+    },
+    "connection_pool": {
+      "min_connections": 5,
+      "max_connections": 20,
+      "idle_timeout_seconds": 600
+    }
+  },
+  "integrations": {
+    "github": {
+      "api_version": "2022-11-28",
+      "base_url": "https://api.github.com",
+      "timeout_seconds": 30,
+      "rate_limiting": {
+        "requests_per_hour": 5000,
+        "burst_limit": 100
+      }
+    },
+    "external_scanners": {
+      "sonarqube": {
+        "enabled": false,
+        "base_url": "${SONAR_URL}",
+        "token_env": "SONAR_TOKEN"
+      },
+      "snyk": {
+        "enabled": false,
+        "api_url": "https://snyk.io/api/v1",
+        "token_env": "SNYK_TOKEN"
+      }
+    }
+  }
+}

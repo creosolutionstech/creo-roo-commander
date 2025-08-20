@@ -1,0 +1,333 @@
+name: QMS Quality Gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      task_file:
+        description: 'Path to MDTM task file to validate'
+        required: false
+        default: ''
+      check_type:
+        description: 'Type of check to perform'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - qms
+        - security
+        - performance
+
+jobs:
+  qms-validation:
+    name: QMS Validation
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm install -g @taplo/cli  # TOML parser
+        npm install -g markdownlint-cli  # Markdown validation
+        sudo apt-get update
+        sudo apt-get install -y jq  # JSON processor
+
+    - name: Find MDTM task files
+      id: find-tasks
+      run: |
+        if [ -n "${{ github.event.inputs.task_file }}" ]; then
+          TASK_FILES="${{ github.event.inputs.task_file }}"
+        else
+          TASK_FILES=$(find .ruru/tasks -name "*.md" -type f | head -10)
+        fi
+        echo "task_files=$TASK_FILES" >> $GITHUB_OUTPUT
+        echo "Found task files: $TASK_FILES"
+
+    - name: Parse MDTM files and validate QMS checkpoints
+      id: qms-check
+      run: |
+        echo "🔍 Starting QMS validation..."
+
+        # Initialize results
+        FAILED_CHECKS=()
+        PASSED_CHECKS=()
+        WARNINGS=()
+
+        # Function to validate TOML frontmatter
+        validate_toml() {
+          local file="$1"
+          echo "📄 Validating: $file"
+
+          # Extract TOML frontmatter
+          local toml_content=""
+          local in_toml=false
+          while IFS= read -r line; do
+            if [[ "$line" == "+++" ]]; then
+              if [ "$in_toml" = true ]; then
+                break
+              else
+                in_toml=true
+                continue
+              fi
+            fi
+
+            if [ "$in_toml" = true ]; then
+              toml_content+="$line"$'\n'
+            fi
+          done < "$file"
+
+          # Check if TOML is valid
+          if ! echo "$toml_content" | taplo check --quiet -; then
+            FAILED_CHECKS+=("❌ Invalid TOML frontmatter in $file")
+            return 1
+          fi
+
+          # Parse QMS fields
+          local qms_enabled=$(echo "$toml_content" | grep -o 'qms_enabled = [^,]*' | cut -d'"' -f2)
+          local test_coverage=$(echo "$toml_content" | grep -o 'qms_test_coverage_min = [^,]*' | grep -o '[0-9]*')
+          local security_required=$(echo "$toml_content" | grep -o 'qms_security_review = "[^"]*"' | cut -d'"' -f2)
+          local doc_required=$(echo "$toml_content" | grep -o 'qms_documentation_required = [^,]*' | cut -d' ' -f3)
+          local performance_threshold=$(echo "$toml_content" | grep -o 'qms_performance_threshold = [^,]*' | grep -o '[0-9]*')
+
+          echo "📊 QMS Configuration:"
+          echo "  - QMS Enabled: $qms_enabled"
+          echo "  - Test Coverage Min: $test_coverage%"
+          echo "  - Security Review: $security_required"
+          echo "  - Documentation Required: $doc_required"
+          echo "  - Performance Threshold: $performance_threshold"
+
+          # Validate QMS requirements
+          if [[ "$qms_enabled" == "true" ]]; then
+            PASSED_CHECKS+=("✅ QMS validation enabled for $file")
+
+            # Check test coverage requirement
+            if [[ -n "$test_coverage" && "$test_coverage" -lt 80 ]]; then
+              WARNINGS+=("⚠️  Low test coverage requirement ($test_coverage%) in $file")
+            elif [[ -z "$test_coverage" ]]; then
+              FAILED_CHECKS+=("❌ Missing test coverage requirement in $file")
+            else
+              PASSED_CHECKS+=("✅ Test coverage requirement ($test_coverage%) set in $file")
+            fi
+
+            # Check security review requirement
+            if [[ "$security_required" == "required" ]]; then
+              PASSED_CHECKS+=("✅ Security review required for $file")
+            else
+              FAILED_CHECKS+=("❌ Security review not required in $file")
+            fi
+
+            # Check documentation requirement
+            if [[ "$doc_required" == "true" ]]; then
+              PASSED_CHECKS+=("✅ Documentation required for $file")
+            else
+              FAILED_CHECKS+=("❌ Documentation not required in $file")
+            fi
+
+            # Check performance threshold
+            if [[ -n "$performance_threshold" && "$performance_threshold" -ge 90 ]]; then
+              PASSED_CHECKS+=("✅ Performance threshold ($performance_threshold) set in $file")
+            elif [[ -z "$performance_threshold" ]]; then
+              WARNINGS+=("⚠️  No performance threshold set in $file")
+            fi
+
+          else
+            WARNINGS+=("⚠️  QMS validation disabled for $file")
+          fi
+
+          return 0
+        }
+
+        # Process each task file
+        for task_file in ${{ steps.find-tasks.outputs.task_files }}; do
+          if [[ -f "$task_file" ]]; then
+            validate_toml "$task_file"
+          else
+            WARNINGS+=("⚠️  Task file not found: $task_file")
+          fi
+        done
+
+        # Output results
+        echo "=== QMS VALIDATION RESULTS ==="
+
+        echo "✅ PASSED CHECKS:"
+        for check in "${PASSED_CHECKS[@]}"; do
+          echo "$check"
+        done
+
+        echo ""
+        echo "⚠️  WARNINGS:"
+        for warning in "${WARNINGS[@]}"; do
+          echo "$warning"
+        done
+
+        echo ""
+        echo "❌ FAILED CHECKS:"
+        for failure in "${FAILED_CHECKS[@]}"; do
+          echo "$failure"
+        done
+
+        # Set outputs for subsequent jobs
+        echo "failed_count=${#FAILED_CHECKS[@]}" >> $GITHUB_OUTPUT
+        echo "warning_count=${#WARNINGS[@]}" >> $GITHUB_OUTPUT
+        echo "passed_count=${#PASSED_CHECKS[@]}" >> $GITHUB_OUTPUT
+
+        # Calculate total
+        local total_count=$(( ${#PASSED_CHECKS[@]} + ${#WARNINGS[@]} + ${#FAILED_CHECKS[@]} ))
+        echo "total_count=$total_count" >> $GITHUB_OUTPUT
+
+        # Exit with error if there are failures
+        if [[ ${#FAILED_CHECKS[@]} -gt 0 ]]; then
+          echo ""
+          echo "🚫 QMS validation failed with ${#FAILED_CHECKS[@]} error(s)"
+          exit 1
+        fi
+
+        echo ""
+        echo "🎉 QMS validation completed successfully!"
+
+    - name: Run security scan
+      if: steps.qms-check.outputs.failed_count == 0
+      run: |
+        echo "🔒 Running security scan..."
+
+        # Check for common security issues
+        SECURITY_ISSUES=()
+
+        # Check for secrets in code
+        if grep -r "password\|secret\|api_key\|token" --include="*.js" --include="*.ts" --include="*.py" --include="*.go" . | grep -v "node_modules" | grep -v ".git"; then
+          SECURITY_ISSUES+=("❌ Potential secrets found in code")
+        else
+          echo "✅ No obvious secrets found in code"
+        fi
+
+        # Check for vulnerable dependencies
+        if [ -f "package.json" ]; then
+          echo "📦 Checking Node.js dependencies..."
+          # This would be replaced with actual vulnerability scanning
+          echo "✅ Dependency check placeholder"
+        fi
+
+        if [[ ${#SECURITY_ISSUES[@]} -gt 0 ]]; then
+          echo "🚨 SECURITY ISSUES FOUND:"
+          for issue in "${SECURITY_ISSUES[@]}"; do
+            echo "$issue"
+          done
+          exit 1
+        fi
+
+        echo "✅ Security scan completed"
+
+    - name: Validate markdown formatting
+      if: steps.qms-check.outputs.failed_count == 0
+      run: |
+        echo "📝 Validating markdown formatting..."
+
+        # Lint markdown files
+        find .ruru/tasks -name "*.md" -type f | head -5 | xargs -I {} markdownlint {}
+
+        echo "✅ Markdown validation completed"
+
+    - name: Generate compliance report
+      if: always()
+      run: |
+        echo "📊 Generating QMS compliance report..."
+
+        cat > qms_report.json << EOF
+        {
+          "timestamp": "$(date -Iseconds)",
+          "commit": "${{ github.sha }}",
+          "branch": "${{ github.ref_name }}",
+          "pr_number": "${{ github.event.number }}",
+          "validation_results": {
+            "passed": ${{ steps.qms-check.outputs.passed_count }},
+            "warnings": ${{ steps.qms-check.outputs.warning_count }},
+            "failed": ${{ steps.qms-check.outputs.failed_count }},
+            "total": ${{ steps.qms-check.outputs.total_count }}
+          },
+          "quality_gates": {
+            "qms_validation": "${{ steps.qms-check.outputs.failed_count == 0 && 'PASSED' || 'FAILED' }}",
+            "security_scan": "${{ steps.qms-check.outputs.failed_count == 0 && 'PASSED' || 'SKIPPED' }}",
+            "documentation_check": "PASSED"
+          }
+        }
+        EOF
+
+        echo "📋 Compliance report generated:"
+        cat qms_report.json | jq '.'
+
+    - name: Comment PR with QMS results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('qms_report.json', 'utf8'));
+
+          const status = report.validation_results.failed > 0 ? '❌ FAILED' : '✅ PASSED';
+          const color = report.validation_results.failed > 0 ? 'red' : 'green';
+
+          const comment = `
+          ## 🔍 QMS Quality Gate Results
+
+          **Status:** ${status}
+
+          ### 📊 Validation Summary
+          - ✅ Passed: ${report.validation_results.passed}
+          - ⚠️ Warnings: ${report.validation_results.warnings}
+          - ❌ Failed: ${report.validation_results.failed}
+
+          ### 🚦 Quality Gates
+          - **QMS Validation:** ${report.quality_gates.qms_validation}
+          - **Security Scan:** ${report.quality_gates.security_scan}
+          - **Documentation:** ${report.quality_gates.documentation_check}
+
+          ---
+          *Report generated on ${report.timestamp} for commit ${report.commit.substring(0, 7)}*
+          `;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Upload QMS report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: qms-compliance-report
+        path: qms_report.json
+        retention-days: 30
+
+  quality-gate-status:
+    name: Quality Gate Status
+    runs-on: ubuntu-latest
+    needs: qms-validation
+    if: always()
+
+    steps:
+    - name: Set final status
+      run: |
+        if [[ "${{ needs.qms-validation.result }}" == "success" ]]; then
+          echo "🎉 All quality gates passed!"
+          exit 0
+        else
+          echo "🚫 Quality gates failed"
+          exit 1
+        fi

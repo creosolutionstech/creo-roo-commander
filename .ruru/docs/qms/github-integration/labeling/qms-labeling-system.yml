@@ -1,0 +1,344 @@
+# QMS Automated PR Labeling System Configuration
+# This configuration defines the comprehensive labeling system for QMS status tracking
+# across all 4 steps of the quality management process
+
+# QMS Step Labels - Primary Status Indicators
+qms_step_labels:
+  # Step 1: Definition of Ready (DoR) Validation
+  step_1_dor:
+    - name: "qms:step-1-pending"
+      description: "DoR validation pending - awaiting checks"
+      color: "FFA500"  # Orange
+      auto_apply: true
+      trigger_events: ["opened", "synchronize"]
+      
+    - name: "qms:step-1-in-progress" 
+      description: "DoR validation in progress"
+      color: "0052CC"  # Blue
+      auto_apply: true
+      workflow_trigger: "qms-dor-validation"
+      
+    - name: "qms:step-1-passed"
+      description: "DoR validation passed - ready for development"
+      color: "28A745"  # Green
+      auto_apply: true
+      required_checks: ["dor-metadata", "dor-branch-strategy", "dor-code-quality", "dor-template-compliance"]
+      
+    - name: "qms:step-1-failed"
+      description: "DoR validation failed - issues need resolution"
+      color: "DC3545"  # Red
+      auto_apply: true
+      failure_trigger: "any_check_failed"
+
+  # Step 2: Progress Review
+  step_2_progress:
+    - name: "qms:step-2-ready"
+      description: "Ready for progress review"
+      color: "17A2B8"  # Info Blue
+      auto_apply: true
+      prerequisites: ["qms:step-1-passed"]
+      
+    - name: "qms:step-2-in-progress"
+      description: "Progress review in progress"
+      color: "6F42C1"  # Purple
+      auto_apply: true
+      
+    - name: "qms:step-2-passed"
+      description: "Progress review approved"
+      color: "28A745"  # Green
+      auto_apply: true
+      
+    - name: "qms:step-2-attention"
+      description: "Progress review requires attention"
+      color: "FFC107"  # Yellow
+      auto_apply: true
+
+  # Step 3: Definition of Done (DoD) Validation  
+  step_3_dod:
+    - name: "qms:step-3-ready"
+      description: "Ready for DoD validation"
+      color: "20C997"  # Teal
+      auto_apply: true
+      prerequisites: ["qms:step-2-passed"]
+      
+    - name: "qms:step-3-in-progress"
+      description: "DoD validation in progress"
+      color: "6610F2"  # Indigo
+      auto_apply: true
+      
+    - name: "qms:step-3-passed"
+      description: "DoD validation passed"
+      color: "28A745"  # Green
+      auto_apply: true
+      required_checks: ["dod-completeness", "dod-testing", "dod-documentation", "dod-security"]
+      
+    - name: "qms:step-3-failed"
+      description: "DoD validation failed"
+      color: "DC3545"  # Red
+      auto_apply: true
+
+  # Step 4: Final QMS Review
+  step_4_final:
+    - name: "qms:step-4-ready"
+      description: "Ready for final QMS review"
+      color: "E83E8C"  # Pink
+      auto_apply: true
+      prerequisites: ["qms:step-3-passed"]
+      
+    - name: "qms:step-4-in-progress"
+      description: "Final QMS review in progress"
+      color: "6F42C1"  # Purple
+      auto_apply: true
+      
+    - name: "qms:step-4-approved"
+      description: "Final QMS review approved - ready to merge"
+      color: "198754"  # Dark Green
+      auto_apply: true
+      
+    - name: "qms:step-4-rejected"
+      description: "Final QMS review rejected"
+      color: "DC3545"  # Red
+      auto_apply: true
+
+# Quality Gate Labels - Specific Validation Types
+quality_gate_labels:
+  # Code Quality Gates
+  code_quality:
+    - name: "qms:code-review-pending"
+      description: "Code review pending"
+      color: "FFA500"  # Orange
+      
+    - name: "qms:code-review-approved"
+      description: "Code review approved"
+      color: "28A745"  # Green
+      
+    - name: "qms:code-quality-passed"
+      description: "Automated code quality checks passed"
+      color: "28A745"  # Green
+      
+    - name: "qms:code-quality-failed"
+      description: "Code quality issues detected"
+      color: "DC3545"  # Red
+
+  # Security Gates
+  security:
+    - name: "qms:security-scan-pending"
+      description: "Security scan pending"
+      color: "FFA500"  # Orange
+      
+    - name: "qms:security-scan-passed"
+      description: "Security scan passed"
+      color: "28A745"  # Green
+      
+    - name: "qms:security-scan-failed"
+      description: "Security vulnerabilities detected"
+      color: "DC3545"  # Red
+      priority: "high"
+
+  # Testing Gates
+  testing:
+    - name: "qms:tests-pending"
+      description: "Test execution pending"
+      color: "FFA500"  # Orange
+      
+    - name: "qms:tests-passed"
+      description: "All tests passed"
+      color: "28A745"  # Green
+      
+    - name: "qms:tests-failed"
+      description: "Test failures detected"
+      color: "DC3545"  # Red
+      
+    - name: "qms:coverage-sufficient"
+      description: "Test coverage meets requirements"
+      color: "28A745"  # Green
+      
+    - name: "qms:coverage-insufficient"
+      description: "Test coverage below threshold"
+      color: "FFC107"  # Yellow
+
+  # Documentation Gates
+  documentation:
+    - name: "qms:docs-complete"
+      description: "Documentation complete"
+      color: "28A745"  # Green
+      
+    - name: "qms:docs-incomplete"
+      description: "Documentation incomplete"
+      color: "FFC107"  # Yellow
+      
+    - name: "qms:docs-review-needed"
+      description: "Documentation needs review"
+      color: "17A2B8"  # Info Blue
+
+# Compliance and Risk Labels
+compliance_labels:
+  # Risk Assessment
+  risk:
+    - name: "qms:risk-low"
+      description: "Low risk change"
+      color: "28A745"  # Green
+      
+    - name: "qms:risk-medium"
+      description: "Medium risk change"
+      color: "FFC107"  # Yellow
+      
+    - name: "qms:risk-high"
+      description: "High risk change - extra scrutiny required"
+      color: "FF6B35"  # Orange-Red
+      priority: "high"
+      
+    - name: "qms:risk-critical"
+      description: "Critical risk change - mandatory review"
+      color: "DC3545"  # Red
+      priority: "critical"
+
+  # Compliance Status
+  compliance:
+    - name: "qms:compliant"
+      description: "Fully compliant with QMS standards"
+      color: "28A745"  # Green
+      
+    - name: "qms:non-compliant"
+      description: "Non-compliant with QMS standards"
+      color: "DC3545"  # Red
+      priority: "high"
+      
+    - name: "qms:compliance-review"
+      description: "Compliance review required"
+      color: "17A2B8"  # Info Blue
+
+# Special Status Labels
+special_labels:
+  # Exemptions and Overrides
+  exemptions:
+    - name: "qms:exempt-emergency"
+      description: "Emergency deployment - QMS steps expedited"
+      color: "FF4136"  # Bright Red
+      priority: "critical"
+      manual_only: true
+      
+    - name: "qms:exempt-hotfix"
+      description: "Hotfix - reduced QMS validation"
+      color: "FF851B"  # Orange
+      priority: "high"
+      manual_only: true
+
+  # Priority Indicators
+  priority:
+    - name: "qms:priority-low"
+      description: "Low priority change"
+      color: "6C757D"  # Gray
+      
+    - name: "qms:priority-normal"
+      description: "Normal priority change"
+      color: "17A2B8"  # Info Blue
+      
+    - name: "qms:priority-high"
+      description: "High priority change"
+      color: "FD7E14"  # Orange
+      
+    - name: "qms:priority-urgent"
+      description: "Urgent change - expedited review"
+      color: "DC3545"  # Red
+      priority: "urgent"
+
+# Label Management Rules
+label_management:
+  # Auto-removal rules
+  auto_remove:
+    - trigger: "qms:step-1-passed"
+      remove: ["qms:step-1-pending", "qms:step-1-in-progress", "qms:step-1-failed"]
+      
+    - trigger: "qms:step-2-passed"
+      remove: ["qms:step-2-ready", "qms:step-2-in-progress", "qms:step-2-attention"]
+      
+    - trigger: "qms:step-3-passed"
+      remove: ["qms:step-3-ready", "qms:step-3-in-progress", "qms:step-3-failed"]
+      
+    - trigger: "qms:step-4-approved"
+      remove: ["qms:step-4-ready", "qms:step-4-in-progress", "qms:step-4-rejected"]
+
+  # Mutual exclusion groups
+  mutex_groups:
+    step_1_status: ["qms:step-1-pending", "qms:step-1-in-progress", "qms:step-1-passed", "qms:step-1-failed"]
+    step_2_status: ["qms:step-2-ready", "qms:step-2-in-progress", "qms:step-2-passed", "qms:step-2-attention"]
+    step_3_status: ["qms:step-3-ready", "qms:step-3-in-progress", "qms:step-3-passed", "qms:step-3-failed"]
+    step_4_status: ["qms:step-4-ready", "qms:step-4-in-progress", "qms:step-4-approved", "qms:step-4-rejected"]
+    risk_level: ["qms:risk-low", "qms:risk-medium", "qms:risk-high", "qms:risk-critical"]
+    priority_level: ["qms:priority-low", "qms:priority-normal", "qms:priority-high", "qms:priority-urgent"]
+
+  # Label dependencies
+  dependencies:
+    "qms:step-2-ready": ["qms:step-1-passed"]
+    "qms:step-3-ready": ["qms:step-2-passed"]
+    "qms:step-4-ready": ["qms:step-3-passed"]
+
+# Integration with GitHub Actions
+github_actions_integration:
+  # Workflow outputs that trigger label updates
+  workflow_label_mapping:
+    qms-dor-validation:
+      success_labels: ["qms:step-1-passed"]
+      failure_labels: ["qms:step-1-failed"]
+      in_progress_labels: ["qms:step-1-in-progress"]
+      
+    qms-progress-review:
+      success_labels: ["qms:step-2-passed"]
+      failure_labels: ["qms:step-2-attention"]
+      in_progress_labels: ["qms:step-2-in-progress"]
+      
+    qms-dod-validation:
+      success_labels: ["qms:step-3-passed"]
+      failure_labels: ["qms:step-3-failed"]
+      in_progress_labels: ["qms:step-3-in-progress"]
+      
+    qms-final-review:
+      success_labels: ["qms:step-4-approved"]
+      failure_labels: ["qms:step-4-rejected"]
+      in_progress_labels: ["qms:step-4-in-progress"]
+
+  # Status check integration
+  status_checks:
+    required_for_merge:
+      - "qms:step-4-approved"
+    
+    blocking_labels:
+      - "qms:step-1-failed"
+      - "qms:step-3-failed"
+      - "qms:step-4-rejected"
+      - "qms:non-compliant"
+      - "qms:security-scan-failed"
+
+# Notification and Alerting
+notifications:
+  # High priority label notifications
+  alert_labels:
+    - "qms:risk-critical"
+    - "qms:security-scan-failed"
+    - "qms:non-compliant"
+    - "qms:exempt-emergency"
+  
+  # Notification channels
+  channels:
+    slack: "#qms-alerts"
+    email: "qms-team@company.com"
+    teams: "QMS Team"
+
+# Reporting and Analytics
+analytics:
+  # Metrics to track
+  metrics:
+    - step_completion_times
+    - failure_rates_by_step
+    - label_frequency
+    - risk_distribution
+    - compliance_rates
+  
+  # Dashboard labels
+  dashboard_filters:
+    - "qms:step-*"
+    - "qms:risk-*"
+    - "qms:priority-*"
+    - "qms:compliant"
+    - "qms:non-compliant"

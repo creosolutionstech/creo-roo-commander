@@ -19,6 +19,16 @@ template_schema_doc = ".ruru/templates/toml-md/01_mdtm_feature.README.md" # Link
 # review_checklist = []
 # reviewed_by = ""
 # key_learnings = ""
+
+# QMS Validation Requirements
+qms_enabled = true # Enable QMS validation checkpoints
+qms_dod_required = true # Definition of Done validation required
+qms_dor_required = true # Definition of Ready validation required
+qms_security_review = "required" # Options: "none", "advisory", "required"
+qms_performance_threshold = 90 # Performance benchmark threshold (%)
+qms_test_coverage_min = 80 # Minimum test coverage (%)
+qms_documentation_required = true # Documentation validation required
+qms_compliance_gate = true # Enable compliance quality gate
 +++
 
 # << CONCISE FEATURE TITLE >>

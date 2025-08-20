@@ -1,0 +1,408 @@
+# QMS Branch Protection Rules Configuration
+# This configuration defines comprehensive branch protection rules that enforce
+# QMS quality gates across all repository branches
+
+# Repository Settings
+repository_config:
+  # Enable vulnerability alerts and automated security fixes
+  vulnerability_alerts: true
+  automated_security_fixes: true
+  
+  # Require signed commits for sensitive branches
+  require_signed_commits: true
+  
+  # Enable dismiss stale reviews when new commits are pushed
+  dismiss_stale_reviews: true
+  
+  # Restrict pushes that create public repositories
+  restrict_public_repos: true
+
+# Branch Protection Rules by Environment/Tier
+branch_protection_rules:
+  # Production Branch (main/master) - Strictest Rules
+  production:
+    branch_patterns:
+      - "main"
+      - "master"
+      
+    # QMS Quality Gates - All 4 steps required
+    required_status_checks:
+      strict: true  # Require branches to be up to date before merging
+      contexts:
+        # Step 1: Definition of Ready (DoR) Validation
+        - "qms/step-1-dor-metadata"
+        - "qms/step-1-dor-branch-strategy"
+        - "qms/step-1-dor-code-quality"
+        - "qms/step-1-dor-template-compliance"
+        
+        # Step 2: Progress Review (Manual + Automated)
+        - "qms/step-2-progress-review"
+        - "qms/step-2-milestone-check"
+        - "qms/step-2-dependency-validation"
+        
+        # Step 3: Definition of Done (DoD) Validation
+        - "qms/step-3-dod-completeness"
+        - "qms/step-3-dod-testing"
+        - "qms/step-3-dod-documentation"
+        - "qms/step-3-dod-security"
+        - "qms/step-3-dod-performance"
+        
+        # Step 4: Final QMS Review
+        - "qms/step-4-final-review"
+        - "qms/step-4-compliance-check"
+        - "qms/step-4-sign-off"
+        
+        # Additional Quality Gates
+        - "continuous-integration"
+        - "security-scan"
+        - "code-coverage"
+        - "sonar-quality-gate"
+        
+    # Pull Request Requirements
+    required_pull_request_reviews:
+      required_approving_review_count: 2
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: true
+      require_last_push_approval: true
+      required_review_dismissal_teams:
+        - "qms-reviewers"
+        - "security-team"
+      bypass_pull_request_allowances:
+        users: []  # No bypass allowed for production
+        teams: []  # No bypass allowed for production
+        apps: []   # No bypass allowed for production
+        
+    # Direct Push Restrictions
+    enforce_admins: true
+    allow_force_pushes: false
+    allow_deletions: false
+    required_linear_history: true
+    
+    # QMS-Specific Requirements
+    qms_requirements:
+      require_qms_labels:
+        - "qms:step-4-approved"
+      
+      block_on_labels:
+        - "qms:step-1-failed"
+        - "qms:step-3-failed" 
+        - "qms:step-4-rejected"
+        - "qms:non-compliant"
+        - "qms:security-scan-failed"
+        - "qms:risk-critical"
+        
+      require_all_conversations_resolved: true
+      
+  # Staging/Release Branch - High Security
+  staging:
+    branch_patterns:
+      - "staging"
+      - "release/*"
+      - "hotfix/*"
+      
+    required_status_checks:
+      strict: true
+      contexts:
+        # Reduced QMS requirements for staging
+        - "qms/step-1-dor-validation"
+        - "qms/step-3-dod-validation"
+        - "qms/security-validation"
+        - "continuous-integration"
+        - "security-scan"
+        - "code-coverage"
+        
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: true
+      require_last_push_approval: false
+      required_review_dismissal_teams:
+        - "qms-reviewers"
+      bypass_pull_request_allowances:
+        users: []
+        teams: ["release-managers"]
+        apps: []
+        
+    enforce_admins: false  # Allow admin override for hotfixes
+    allow_force_pushes: false
+    allow_deletions: false
+    required_linear_history: true
+    
+    qms_requirements:
+      require_qms_labels:
+        - "qms:step-3-passed"
+        
+      block_on_labels:
+        - "qms:non-compliant"
+        - "qms:security-scan-failed"
+        
+  # Development Branch - Moderate Security
+  development:
+    branch_patterns:
+      - "develop"
+      - "dev"
+      
+    required_status_checks:
+      strict: false  # Allow slightly behind branches
+      contexts:
+        # Basic QMS requirements for development
+        - "qms/step-1-dor-basic"
+        - "continuous-integration"
+        - "basic-security-scan"
+        
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: false
+      require_code_owner_reviews: false
+      require_last_push_approval: false
+      bypass_pull_request_allowances:
+        users: []
+        teams: ["dev-leads", "qms-reviewers"]
+        apps: ["dependabot"]
+        
+    enforce_admins: false
+    allow_force_pushes: false
+    allow_deletions: true  # Allow cleanup in dev
+    required_linear_history: false
+    
+    qms_requirements:
+      require_qms_labels:
+        - "qms:step-1-passed"
+        
+      block_on_labels:
+        - "qms:security-scan-failed"
+        
+  # Feature Branches - Basic Protection
+  feature:
+    branch_patterns:
+      - "feature/*"
+      - "feat/*"
+      - "bugfix/*"
+      - "fix/*"
+      
+    required_status_checks:
+      strict: false
+      contexts:
+        - "continuous-integration"
+        - "basic-linting"
+        
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: false
+      require_code_owner_reviews: false
+      require_last_push_approval: false
+      bypass_pull_request_allowances:
+        users: []
+        teams: ["developers"]
+        apps: ["dependabot"]
+        
+    enforce_admins: false
+    allow_force_pushes: true   # Allow rebasing/squashing
+    allow_deletions: true
+    required_linear_history: false
+
+# Emergency Override Procedures
+emergency_overrides:
+  # Critical Production Issues
+  critical_hotfix:
+    trigger_conditions:
+      - "qms:exempt-emergency" # Label required
+      - severity: "critical"
+      - incident_declared: true
+      
+    modified_rules:
+      production:
+        required_status_checks:
+          contexts:
+            - "qms/emergency-validation"
+            - "security-scan"  # Still require security
+            - "continuous-integration"
+            
+        required_pull_request_reviews:
+          required_approving_review_count: 1  # Reduced from 2
+          bypass_pull_request_allowances:
+            teams: ["incident-commanders", "security-leads"]
+            
+    approval_required_from:
+      - "incident-commander"
+      - "security-lead"
+      - "qms-lead"
+      
+    audit_requirements:
+      post_incident_review: true
+      compliance_documentation: true
+      
+  # Scheduled Maintenance Windows
+  maintenance_window:
+    trigger_conditions:
+      - "qms:maintenance-window"
+      - scheduled_maintenance: true
+      
+    modified_rules:
+      production:
+        required_status_checks:
+          contexts:
+            - "qms/maintenance-validation"
+            - "security-scan"
+            - "rollback-plan-verified"
+            
+        required_pull_request_reviews:
+          required_approving_review_count: 1
+          
+    approval_required_from:
+      - "ops-lead"
+      - "qms-reviewer"
+
+# Status Check Configuration
+status_checks:
+  # QMS Step 1: DoR Validation Checks
+  qms_step_1:
+    "qms/step-1-dor-metadata":
+      description: "Validates PR metadata completeness"
+      workflow: ".github/workflows/qms-dor-validation.yml"
+      timeout_minutes: 5
+      
+    "qms/step-1-dor-branch-strategy":
+      description: "Validates branch naming and strategy compliance"
+      workflow: ".github/workflows/qms-dor-validation.yml"
+      timeout_minutes: 3
+      
+    "qms/step-1-dor-code-quality":
+      description: "Basic code quality and linting checks"
+      workflow: ".github/workflows/qms-dor-validation.yml"
+      timeout_minutes: 10
+      
+    "qms/step-1-dor-template-compliance":
+      description: "Validates QMS template compliance"
+      workflow: ".github/workflows/qms-dor-validation.yml"
+      timeout_minutes: 5
+      
+  # QMS Step 2: Progress Review Checks
+  qms_step_2:
+    "qms/step-2-progress-review":
+      description: "Automated progress review validation"
+      workflow: ".github/workflows/qms-progress-review.yml"
+      timeout_minutes: 15
+      
+    "qms/step-2-milestone-check":
+      description: "Milestone and timeline validation"
+      workflow: ".github/workflows/qms-progress-review.yml"
+      timeout_minutes: 5
+      
+  # QMS Step 3: DoD Validation Checks
+  qms_step_3:
+    "qms/step-3-dod-completeness":
+      description: "Validates feature completeness"
+      workflow: ".github/workflows/qms-dod-validation.yml"
+      timeout_minutes: 10
+      
+    "qms/step-3-dod-testing":
+      description: "Comprehensive testing validation"
+      workflow: ".github/workflows/qms-dod-validation.yml"
+      timeout_minutes: 30
+      
+    "qms/step-3-dod-documentation":
+      description: "Documentation completeness check"
+      workflow: ".github/workflows/qms-dod-validation.yml"
+      timeout_minutes: 5
+      
+    "qms/step-3-dod-security":
+      description: "Security validation and vulnerability scan"
+      workflow: ".github/workflows/qms-dod-validation.yml"
+      timeout_minutes: 20
+      
+    "qms/step-3-dod-performance":
+      description: "Performance impact assessment"
+      workflow: ".github/workflows/qms-dod-validation.yml"
+      timeout_minutes: 25
+      
+  # QMS Step 4: Final Review Checks
+  qms_step_4:
+    "qms/step-4-final-review":
+      description: "Final QMS review validation"
+      workflow: ".github/workflows/qms-final-review.yml"
+      timeout_minutes: 10
+      
+    "qms/step-4-compliance-check":
+      description: "Final compliance verification"
+      workflow: ".github/workflows/qms-final-review.yml"
+      timeout_minutes: 15
+      
+  # Standard Quality Gates
+  standard_checks:
+    "continuous-integration":
+      description: "Run test suite and build validation"
+      workflow: ".github/workflows/ci.yml"
+      timeout_minutes: 45
+      
+    "security-scan":
+      description: "Security vulnerability and SAST scan"
+      workflow: ".github/workflows/security.yml"
+      timeout_minutes: 30
+      
+    "code-coverage":
+      description: "Code coverage analysis"
+      workflow: ".github/workflows/coverage.yml"
+      timeout_minutes: 20
+
+# Integration with External Systems
+external_integrations:
+  # JIRA Integration for QMS Tracking
+  jira:
+    required_for_branches: ["main", "staging", "release/*"]
+    ticket_validation:
+      require_linked_ticket: true
+      valid_statuses: ["In Progress", "Code Review", "Ready for QA"]
+      
+  # Slack Notifications for Protection Events
+  slack:
+    channels:
+      protection_violations: "#qms-violations"
+      emergency_overrides: "#incident-response"
+      
+  # ServiceNow for Change Management
+  servicenow:
+    required_for_branches: ["main"]
+    change_types:
+      - "standard"
+      - "emergency"
+      - "normal"
+
+# Monitoring and Compliance
+monitoring:
+  # Track protection rule effectiveness
+  metrics:
+    - protection_rule_violations
+    - override_frequency
+    - qms_step_completion_rates
+    - time_to_merge_by_branch
+    
+  # Compliance reporting
+  compliance_reports:
+    frequency: "weekly"
+    recipients: ["qms-team@company.com"]
+    include_metrics:
+      - protection_bypass_events
+      - failed_quality_gates
+      - emergency_override_usage
+      
+# Rule Exceptions and Exemptions
+exceptions:
+  # Bot and Automation Exemptions
+  automation_accounts:
+    - "dependabot[bot]"
+    - "renovate[bot]"
+    - "qms-automation[bot]"
+    
+  # Documentation-Only Changes
+  docs_only_paths:
+    - "docs/**"
+    - "*.md"
+    - ".github/workflows/docs.yml"
+    
+  # Configuration-Only Changes (with review)
+  config_only_paths:
+    - "config/**"
+    - "*.config.js"
+    - "package.json"
+    - "Dockerfile"

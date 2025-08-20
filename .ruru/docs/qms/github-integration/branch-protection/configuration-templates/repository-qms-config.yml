@@ -1,0 +1,271 @@
+# QMS Repository Configuration Template
+# Place this file at .qms/branch-protection.yml in each repository
+
+# Repository Metadata
+repository:
+  name: "example-repository"
+  tier: "business_critical"  # Options: mission_critical, business_critical, standard, experimental
+  description: "Example repository demonstrating QMS branch protection configuration"
+  owner: "example-org"
+  
+# Branch Protection Configuration
+branch_protection:
+  target_branches: 
+    - "main"
+    - "release/*"
+    - "hotfix/*"
+  
+  # Status Checks Configuration
+  status_checks:
+    enabled_checks:
+      # Definition of Ready (DoR) Validation
+      - name: "qms/dor-validation"
+        required: true
+        bypass_level: 2  # Level 2: Architect approval required
+        
+      # Security Checks (Critical)
+      - name: "qms/security-scan-critical"
+        required: true
+        bypass_level: 3  # Level 3: QMS Coordinator approval
+        
+      - name: "qms/security-scan-high" 
+        required: true
+        bypass_level: 2
+        
+      - name: "qms/dependency-audit"
+        required: true
+        bypass_level: 2
+        
+      # Code Quality Checks
+      - name: "qms/code-quality-gate"
+        required: true
+        bypass_level: 1  # Level 1: Lead approval sufficient
+        
+      - name: "qms/test-coverage"
+        required: true
+        bypass_level: 1
+        minimum_coverage: 80
+        
+      - name: "qms/static-analysis"
+        required: true
+        bypass_level: 1
+        
+      # Compliance Checks
+      - name: "qms/compliance-audit"
+        required: true
+        bypass_level: 3  # High compliance requirement
+        
+      - name: "qms/license-check"
+        required: true
+        bypass_level: 2
+        
+      # Definition of Done (DoD) Validation
+      - name: "qms/dod-validation"
+        required: true
+        bypass_level: 2
+        
+    # Performance and contextual checks (lower priority)
+    optional_checks:
+      - name: "qms/performance-baseline"
+        bypass_level: 1
+        
+      - name: "qms/documentation-check"
+        bypass_level: 1
+        
+      - name: "qms/security-scan-medium"
+        bypass_level: 1
+        
+  # Bypass Controls Configuration
+  bypass_controls:
+    level_1_enabled: true
+    level_2_enabled: true
+    level_3_enabled: true
+    emergency_enabled: true
+    
+    # Bypass request requirements
+    require_justification: true
+    require_post_merge_tasks: true
+    auto_create_compliance_tasks: true
+    
+# Review Requirements
+review_requirements:
+  required_reviewers: 2
+  require_code_owner_reviews: true
+  dismiss_stale_reviews: true
+  require_review_from_code_owners: true
+  
+  # QMS Specialist Assignment
+  specialty_assignment:
+    enabled: true
+    algorithm_weights:
+      expertise_match: 0.40
+      workload_balance: 0.30
+      availability: 0.20
+      context_preservation: 0.10
+      
+    assignment_rules:
+      security_changes:
+        primary: ["security-specialist", "senior-developer"]
+        secondary: ["qms-security-scanner", "architect"]
+        file_patterns:
+          - "**/*auth*"
+          - "**/*security*"
+          - "**/*crypto*"
+          - "**/permissions/**"
+          
+      database_changes:
+        primary: ["database-specialist", "senior-developer"]
+        secondary: ["qms-dod-validator", "architect"]
+        file_patterns:
+          - "**/*migration*"
+          - "**/*schema*"
+          - "**/*.sql"
+          - "**/models/**"
+          
+      infrastructure_changes:
+        primary: ["devops-specialist", "infrastructure-architect"]
+        secondary: ["security-specialist", "senior-developer"]
+        file_patterns:
+          - "**/Dockerfile*"
+          - "**/*docker*"
+          - "**/*.yml"
+          - "**/*.yaml"
+          - "**/terraform/**"
+          - "**/k8s/**"
+          
+      frontend_changes:
+        primary: ["frontend-specialist", "ui-developer"]
+        secondary: ["senior-developer", "qms-code-reviewer"]
+        file_patterns:
+          - "**/*.jsx"
+          - "**/*.tsx"
+          - "**/*.vue"
+          - "**/*.css"
+          - "**/*.scss"
+          
+      api_changes:
+        primary: ["api-specialist", "backend-developer"]
+        secondary: ["security-specialist", "senior-developer"]
+        file_patterns:
+          - "**/api/**"
+          - "**/*endpoint*"
+          - "**/*controller*"
+          - "**/*route*"
+
+# Merge Restrictions
+merge_restrictions:
+  # Branch protection rules
+  require_status_checks: true
+  require_up_to_date_branches: true
+  require_signed_commits: false
+  
+  # Merge methods
+  allow_merge_commits: true
+  allow_squash_merging: true
+  allow_rebase_merging: false
+  
+  # Additional restrictions
+  restrict_pushes_to_admins: true
+  allow_force_pushes: false
+  allow_deletions: false
+  
+  # Linear history requirement (tier-dependent)
+  require_linear_history: true  # Set based on repository tier
+
+# Emergency Response Configuration
+emergency_contacts:
+  primary_oncall: "team-lead-oncall"
+  secondary_oncall: "architect-oncall"
+  escalation_chain:
+    - "team-lead"
+    - "technical-architect" 
+    - "engineering-manager"
+    - "cto"
+    
+  notification_channels:
+    slack:
+      - "#team-alerts"
+      - "#qms-notifications"
+    email:
+      - "team-alerts@company.com"
+      - "qms-alerts@company.com"
+      
+# Monitoring and Alerting
+monitoring:
+  metrics_enabled: true
+  alerting_enabled: true
+  
+  # Key metrics to track
+  tracked_metrics:
+    - "merge_time"
+    - "review_time" 
+    - "check_success_rate"
+    - "bypass_frequency"
+    - "defect_escape_rate"
+    
+  # Alert thresholds
+  alert_thresholds:
+    check_failure_rate: 10  # Percentage
+    average_merge_time: 48  # Hours
+    bypass_frequency: 5     # Per month
+    
+# Compliance and Audit Configuration
+compliance:
+  audit_enabled: true
+  retention_period: "7_years"
+  
+  # Regulatory requirements
+  regulatory_frameworks:
+    - "SOX"
+    - "PCI-DSS"
+    - "GDPR"
+    
+  # Required documentation
+  required_documentation:
+    - "change_justification"
+    - "risk_assessment"
+    - "testing_evidence"
+    
+  # Automated compliance checks
+  automated_checks:
+    - "commit_message_format"
+    - "branch_naming_convention"
+    - "required_files_present"
+
+# Integration Configuration
+integrations:
+  jira:
+    enabled: true
+    project_key: "PROJ"
+    issue_linking_required: false
+    
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channels:
+      notifications: "#qms-notifications"
+      alerts: "#qms-alerts"
+      
+  email:
+    enabled: true
+    smtp_server: "smtp.company.com"
+    from_address: "qms-no-reply@company.com"
+
+# Custom Configuration (Repository-Specific)
+custom:
+  # Repository-specific overrides
+  special_requirements:
+    - name: "custom_security_check"
+      enabled: false
+      
+  # Additional file patterns for review assignment
+  additional_patterns:
+    critical_files:
+      - "**/config/production.yml"
+      - "**/secrets/**"
+      
+  # Custom bypass procedures
+  custom_bypass_procedures:
+    - condition: "hotfix_deployment"
+      max_bypass_level: 2
+      requires_post_deployment_audit: true

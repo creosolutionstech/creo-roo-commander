@@ -1,0 +1,535 @@
+# QMS PR Comment System Configuration
+# This configuration defines the comprehensive comment system for providing
+# feedback and status updates throughout the 4-step QMS process
+
+# Comment System Architecture
+comment_system:
+  # Core commenting bot configuration
+  bot_config:
+    name: "qms-bot[bot]"
+    display_name: "🔍 QMS Quality Assistant"
+    avatar_url: "https://avatars.githubusercontent.com/qms-bot"
+    permissions:
+      - read_repository
+      - write_pull_requests
+      - manage_labels
+      - read_status_checks
+      
+  # Comment behavior settings
+  behavior:
+    update_existing_comments: true  # Update existing comments rather than creating new ones
+    collapse_resolved_comments: true
+    auto_resolve_on_fix: true
+    notify_on_status_change: true
+    include_helpful_links: true
+    
+  # Integration points
+  integrations:
+    github_actions: true
+    status_checks: true
+    labels: true
+    reviews: true
+    webhooks: true
+
+# Comment Templates by QMS Step
+comment_templates:
+  # Step 1: Definition of Ready (DoR) Validation Comments
+  step_1_dor:
+    # Initial DoR validation start
+    dor_validation_start:
+      trigger: "workflow_started"
+      workflow: "qms-dor-validation"
+      template: |
+        ## 🔍 QMS Step 1: Definition of Ready (DoR) Validation
+        
+        **Status:** 🟡 In Progress  
+        **Started:** {{ timestamp }}
+        
+        I'm now validating this PR against our Definition of Ready criteria:
+        
+        ### Validation Checklist
+        - [ ] **Metadata Validation** - Checking PR title, description, and linked issues
+        - [ ] **Branch Strategy** - Validating branch naming and merge target
+        - [ ] **Code Quality** - Running initial linting and formatting checks
+        - [ ] **Template Compliance** - Ensuring QMS templates are properly filled
+        
+        ### What happens next?
+        - ✅ All checks pass → Automatically apply `qms:step-1-passed` label and proceed to development
+        - ❌ Issues found → Apply `qms:step-1-failed` label and provide specific feedback
+        
+        ---
+        *This comment will be updated as validation progresses. [Learn more about QMS DoR validation](docs/qms/workflows/4-step-qms-review-workflow-v1.md#step-1-dor)*
+        
+    # DoR validation success
+    dor_validation_success:
+      trigger: "all_checks_passed"
+      template: |
+        ## ✅ QMS Step 1: Definition of Ready - PASSED
+        
+        **Status:** 🟢 Complete  
+        **Completed:** {{ timestamp }}  
+        **Duration:** {{ duration }}
+        
+        Great work! This PR has successfully passed all Definition of Ready validations:
+        
+        ### ✅ Validation Results
+        - ✅ **Metadata Validation** - PR properly titled and described
+        - ✅ **Branch Strategy** - Follows naming conventions and targets correct branch
+        - ✅ **Code Quality** - Passes initial linting and formatting
+        - ✅ **Template Compliance** - QMS templates properly completed
+        
+        ### 🎯 Next Steps
+        You can now proceed with development. Once your changes are ready:
+        1. Request a progress review (QMS Step 2)
+        2. Ensure all tests pass
+        3. The QMS system will automatically guide you through the remaining steps
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-1-passed`
+        - Removed: `qms:step-1-pending`, `qms:step-1-in-progress`
+        
+        ---
+        *Happy coding! The next QMS validation will automatically trigger when you're ready for review.*
+        
+    # DoR validation failure
+    dor_validation_failure:
+      trigger: "validation_failed"
+      template: |
+        ## ❌ QMS Step 1: Definition of Ready - FAILED
+        
+        **Status:** 🔴 Failed  
+        **Completed:** {{ timestamp }}  
+        **Duration:** {{ duration }}
+        
+        This PR needs attention before it can proceed through our quality gates. Please address the following issues:
+        
+        ### ❌ Validation Issues
+        {{#each failures}}
+        - ❌ **{{category}}**: {{message}}
+          {{#if suggestion}}
+          - 💡 **Suggestion:** {{suggestion}}
+          {{/if}}
+          {{#if help_link}}
+          - 📖 **Help:** [{{help_text}}]({{help_link}})
+          {{/if}}
+        {{/each}}
+        
+        ### 🔧 How to Fix
+        1. Address each issue listed above
+        2. Push your changes to trigger re-validation
+        3. The QMS system will automatically re-run checks
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-1-failed`
+        - Removed: `qms:step-1-in-progress`, `qms:step-1-pending`
+        
+        ### 📞 Need Help?
+        - 📚 [QMS Documentation](docs/qms/)
+        - 💬 Ask in `#qms-support` Slack channel
+        - 👥 Request help from `@qms-team`
+        
+        ---
+        *Once all issues are resolved, the validation will automatically re-run.*
+
+  # Step 2: Progress Review Comments
+  step_2_progress:
+    # Progress review ready
+    progress_review_ready:
+      trigger: "step_1_passed"
+      template: |
+        ## 📊 QMS Step 2: Progress Review Available
+        
+        **Status:** 🔵 Ready  
+        **Available Since:** {{ timestamp }}
+        
+        Your PR has passed DoR validation and is now eligible for progress review!
+        
+        ### 🎯 Progress Review Scope
+        The progress review will evaluate:
+        - **Feature Progress** - Development completeness vs. requirements
+        - **Milestone Alignment** - Timeline and deliverable tracking
+        - **Dependency Management** - Integration with other work streams
+        - **Risk Assessment** - Potential blockers and mitigation strategies
+        
+        ### 🚀 Request Progress Review
+        To initiate the progress review:
+        1. **Automated**: Comment `/qms progress-review` to trigger automated checks
+        2. **Manual**: Request review from `@qms-reviewers` team
+        3. **Self-Service**: Apply the `qms:step-2-ready` label manually
+        
+        ### 📝 What to Prepare
+        - Update progress notes in the PR description
+        - Document any blockers or concerns
+        - Link related issues or dependencies
+        - Provide testing instructions if applicable
+        
+        ---
+        *Progress reviews typically complete within 24 hours during business days.*
+        
+    # Progress review in progress
+    progress_review_started:
+      trigger: "review_started"
+      template: |
+        ## 📊 QMS Step 2: Progress Review - IN PROGRESS
+        
+        **Status:** 🟡 In Progress  
+        **Started:** {{ timestamp }}  
+        **Reviewer:** {{ reviewer }}
+        
+        A QMS progress review is now underway for this PR.
+        
+        ### 🔍 Review Areas
+        - [ ] **Feature Completeness** - Evaluating development progress
+        - [ ] **Timeline Adherence** - Checking milestone alignment
+        - [ ] **Quality Indicators** - Assessing intermediate quality metrics
+        - [ ] **Risk Factors** - Identifying potential issues
+        
+        ### ⏱️ Expected Timeline
+        - **Standard Reviews**: 4-24 hours
+        - **Complex Changes**: Up to 48 hours
+        - **Priority Items**: Within 4 hours
+        
+        ### 📞 Reviewer Contact
+        Questions about this review? Contact: {{reviewer_contact}}
+        
+        ---
+        *You'll receive an update when the review is complete.*
+
+  # Step 3: Definition of Done (DoD) Validation Comments  
+  step_3_dod:
+    # DoD validation comprehensive
+    dod_validation_comprehensive:
+      trigger: "dod_validation_started"
+      template: |
+        ## 🎯 QMS Step 3: Definition of Done (DoD) Validation
+        
+        **Status:** 🟡 In Progress  
+        **Started:** {{ timestamp }}
+        
+        Now performing comprehensive Definition of Done validation. This is the most thorough QMS check!
+        
+        ### 🔍 Comprehensive Validation Suite
+        - [ ] **Feature Completeness** ({{completeness_score}}%) - All requirements implemented
+        - [ ] **Testing Coverage** ({{coverage_percentage}}%) - Unit, integration, and E2E tests
+        - [ ] **Documentation Quality** - API docs, user guides, technical documentation
+        - [ ] **Security Validation** - Vulnerability scans and compliance checks
+        - [ ] **Performance Impact** - Load testing and performance benchmarks
+        - [ ] **Accessibility Compliance** - WCAG 2.1 AA standards
+        - [ ] **Browser Compatibility** - Cross-browser testing results
+        
+        ### 📊 Current Status
+        {{#each validations}}
+        - {{#if passed}}✅{{else if in_progress}}🟡{{else}}❌{{/if}} **{{name}}**: {{status}}
+          {{#if details}}
+          - {{details}}
+          {{/if}}
+        {{/each}}
+        
+        ### ⚡ Performance Snapshot
+        - **Build Time**: {{build_time}}
+        - **Test Suite**: {{test_duration}} ({{test_count}} tests)
+        - **Bundle Size**: {{bundle_size}} ({{size_change}} from baseline)
+        - **Lighthouse Score**: {{lighthouse_score}}/100
+        
+        ---
+        *This validation typically takes 10-30 minutes depending on PR complexity.*
+        
+    # DoD validation results
+    dod_validation_results:
+      trigger: "dod_validation_complete"
+      template: |
+        ## {{#if passed}}✅{{else}}❌{{/if}} QMS Step 3: Definition of Done - {{#if passed}}PASSED{{else}}FAILED{{/if}}
+        
+        **Status:** {{#if passed}}🟢 Complete{{else}}🔴 Failed{{/if}}  
+        **Completed:** {{ timestamp }}  
+        **Duration:** {{ duration }}
+        
+        {{#if passed}}
+        Excellent! This PR meets all Definition of Done criteria and is ready for final review.
+        {{else}}
+        This PR requires attention in several areas before it can proceed to final review.
+        {{/if}}
+        
+        ### 📋 Detailed Results
+        {{#each validations}}
+        - {{#if passed}}✅{{else}}❌{{/if}} **{{name}}** {{#if passed}}PASSED{{else}}FAILED{{/if}}
+          {{#if score}}- Score: {{score}}%{{/if}}
+          {{#if details}}- {{details}}{{/if}}
+          {{#if failures}}
+          {{#each failures}}
+            - ❌ {{this}}
+          {{/each}}
+          {{/if}}
+        {{/each}}
+        
+        {{#if passed}}
+        ### 🎉 Quality Metrics
+        - **Overall Quality Score**: {{quality_score}}%
+        - **Test Coverage**: {{test_coverage}}%
+        - **Performance Score**: {{performance_score}}/100
+        - **Security Score**: {{security_score}}/10
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-3-passed`
+        - Ready for: Step 4 (Final QMS Review)
+        {{else}}
+        ### 🔧 Required Actions
+        {{#each required_actions}}
+        {{this}}
+        {{/each}}
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-3-failed`
+        - Blocking: Final review until issues resolved
+        {{/if}}
+
+  # Step 4: Final QMS Review Comments
+  step_4_final:
+    # Final review comprehensive
+    final_review_comprehensive:
+      trigger: "final_review_started"
+      template: |
+        ## 🏁 QMS Step 4: Final Quality Review
+        
+        **Status:** 🟡 In Progress  
+        **Started:** {{ timestamp }}  
+        **Lead Reviewer:** {{ lead_reviewer }}
+        
+        This is the final and most comprehensive quality review before merge approval!
+        
+        ### 🔍 Final Review Checklist
+        - [ ] **Business Requirements** - Complete feature validation against acceptance criteria
+        - [ ] **Technical Excellence** - Code architecture, patterns, and maintainability  
+        - [ ] **Security Posture** - Comprehensive security and compliance validation
+        - [ ] **Operational Readiness** - Monitoring, logging, and observability
+        - [ ] **Risk Assessment** - Production deployment risk analysis
+        - [ ] **Documentation Review** - User-facing and technical documentation quality
+        - [ ] **Stakeholder Sign-off** - Required approvals from product and technical leads
+        
+        ### 👥 Review Team
+        {{#each reviewers}}
+        - **{{role}}**: {{name}} ({{contact}})
+        {{/each}}
+        
+        ### 📊 Pre-Review Summary
+        - **QMS Steps Completed**: 3/3 ✅
+        - **Quality Gates Passed**: {{gates_passed}}/{{total_gates}}
+        - **Overall Quality Score**: {{overall_score}}%
+        - **Risk Level**: {{risk_level}}
+        
+        ### ⏱️ Expected Timeline
+        - **Standard Changes**: 24-48 hours
+        - **Critical Changes**: 4-12 hours  
+        - **High-Risk Changes**: Up to 72 hours
+        
+        ---
+        *This is the final checkpoint before your changes can be merged to production.*
+        
+    # Final review decision
+    final_review_decision:
+      trigger: "final_review_complete"
+      template: |
+        ## {{#if approved}}🎉{{else}}⏸️{{/if}} QMS Step 4: Final Review - {{#if approved}}APPROVED{{else}}REQUIRES CHANGES{{/if}}
+        
+        **Status:** {{#if approved}}🟢 Approved{{else}}🟡 Changes Required{{/if}}  
+        **Completed:** {{ timestamp }}  
+        **Lead Reviewer:** {{ lead_reviewer }}
+        **Duration:** {{ duration }}
+        
+        {{#if approved}}
+        🎊 **Congratulations!** This PR has successfully completed the full QMS quality review process and is now **approved for merge**.
+        
+        ### ✅ Final Approval Summary
+        - **Business Requirements**: ✅ Fully satisfied
+        - **Technical Quality**: ✅ Meets excellence standards  
+        - **Security Review**: ✅ No concerns identified
+        - **Risk Assessment**: ✅ {{risk_level}} risk acceptable
+        - **Stakeholder Sign-off**: ✅ All required approvals obtained
+        
+        ### 🏆 Quality Achievement
+        - **Final Quality Score**: {{final_score}}% 
+        - **QMS Compliance**: 100%
+        - **Review Efficiency**: {{review_efficiency}}
+        
+        ### 🚀 Merge Authorization
+        This PR is now authorized for merge with the following conditions met:
+        - All required status checks passing ✅
+        - Branch protection rules satisfied ✅  
+        - QMS quality gates completed ✅
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-4-approved`, `ready-to-merge`
+        - Removed: All pending/in-progress labels
+        {{else}}
+        ### 📝 Changes Required
+        The review team has identified areas that need attention before this PR can be approved:
+        
+        {{#each change_requests}}
+        #### {{category}}
+        {{#each items}}
+        - {{severity}} **{{title}}**: {{description}}
+          {{#if suggestion}}- 💡 **Suggestion**: {{suggestion}}{{/if}}
+          {{#if resources}}- 📚 **Resources**: {{resources}}{{/if}}
+        {{/each}}
+        {{/each}}
+        
+        ### 🔄 Next Steps
+        1. Address the change requests above
+        2. Update the PR with your fixes
+        3. Request re-review by commenting `/qms re-review`
+        4. The review team will prioritize your updated PR
+        
+        ### 🏷️ Labels Applied
+        - Added: `qms:step-4-changes-required`
+        - Removed: `qms:step-4-in-progress`
+        {{/if}}
+
+# Interactive Comment Commands
+interactive_commands:
+  # QMS command triggers
+  qms_commands:
+    "/qms status":
+      description: "Show current QMS status and progress"
+      response_template: |
+        ## 📊 QMS Status Report
+        
+        **Current Step**: {{current_step}} ({{current_step_name}})
+        **Overall Progress**: {{progress_percentage}}% complete
+        **Time in Current Step**: {{time_in_step}}
+        
+        ### Step Status Overview
+        {{#each steps}}
+        - {{#if completed}}✅{{else if current}}🟡{{else}}⚪{{/if}} **Step {{number}}**: {{name}} {{#if completed}}({{duration}}){{/if}}
+        {{/each}}
+        
+        ### Quality Metrics
+        - **Quality Score**: {{quality_score}}%
+        - **Risk Level**: {{risk_level}}
+        - **Compliance**: {{compliance_status}}
+        
+    "/qms help":
+      description: "Show QMS help and available commands"
+      response_template: |
+        ## 🤖 QMS Assistant Help
+        
+        ### Available Commands
+        - `/qms status` - Show current QMS progress and status
+        - `/qms retry` - Retry failed validation (if applicable)
+        - `/qms progress-review` - Request manual progress review
+        - `/qms re-review` - Request re-review after addressing feedback
+        - `/qms override <reason>` - Request emergency override (requires approval)
+        - `/qms help` - Show this help message
+        
+        ### QMS Process Overview
+        1. **DoR Validation** - Ensures PR meets basic requirements
+        2. **Progress Review** - Evaluates development progress and alignment  
+        3. **DoD Validation** - Comprehensive quality and completeness check
+        4. **Final Review** - Business and technical sign-off for merge approval
+        
+        ### Support Resources
+        - 📚 [QMS Documentation](docs/qms/)
+        - 💬 `#qms-support` Slack channel
+        - 👥 `@qms-team` for urgent issues
+
+# Status Update Comments
+status_updates:
+  # Automatic status updates
+  label_change_notifications:
+    template: |
+      ## 🏷️ QMS Status Update
+      
+      **{{action}}**: `{{label_name}}`
+      **Timestamp**: {{timestamp}}
+      **Triggered by**: {{trigger_source}}
+      
+      {{#if next_action}}
+      ### 🎯 What's Next?
+      {{next_action}}
+      {{/if}}
+      
+      {{#if helpful_links}}
+      ### 📖 Helpful Resources
+      {{#each helpful_links}}
+      - [{{title}}]({{url}})
+      {{/each}}
+      {{/if}}
+
+  # Workflow completion notifications
+  workflow_notifications:
+    template: |
+      ## 🔔 QMS Workflow Update
+      
+      **Workflow**: {{workflow_name}}
+      **Status**: {{status}}
+      **Duration**: {{duration}}
+      
+      {{#if status_checks}}
+      ### Status Checks
+      {{#each status_checks}}
+      - {{#if passed}}✅{{else}}❌{{/if}} {{name}}: {{status}}
+      {{/each}}
+      {{/if}}
+      
+      {{#if next_steps}}
+      ### Next Steps
+      {{next_steps}}
+      {{/if}}
+
+# Error and Warning Comments  
+error_handling:
+  # System errors
+  system_error:
+    template: |
+      ## ⚠️ QMS System Error
+      
+      **Error Type**: {{error_type}}
+      **Timestamp**: {{timestamp}}
+      **Error ID**: `{{error_id}}`
+      
+      We encountered an issue while processing your PR through the QMS system:
+      
+      **Error**: {{error_message}}
+      
+      ### 🔧 Immediate Actions
+      {{#if auto_retry}}
+      - The system will automatically retry in {{retry_delay}}
+      {{else}}
+      - Please retry manually with `/qms retry`
+      {{/if}}
+      - If this persists, contact `@qms-team`
+      
+      ### 📞 Support Information
+      - **Error ID**: `{{error_id}}` (include this when reporting)
+      - **Support Channel**: `#qms-support`
+      - **Emergency Contact**: `@qms-oncall`
+
+# Personalization and Context
+personalization:
+  # User-specific messaging
+  user_context:
+    include_user_history: true
+    mention_previous_prs: true
+    adapt_tone_to_experience: true
+    suggest_relevant_resources: true
+    
+  # Team-specific customization
+  team_context:
+    include_team_metrics: true
+    highlight_team_standards: true
+    reference_team_docs: true
+    tag_relevant_experts: true
+
+# Performance and Optimization
+performance:
+  # Comment optimization
+  comment_management:
+    max_comments_per_pr: 10
+    collapse_old_comments: true
+    summarize_resolved_threads: true
+    cleanup_after_merge: true
+    
+  # Template caching
+  template_cache:
+    enabled: true
+    ttl_hours: 24
+    preload_common_templates: true

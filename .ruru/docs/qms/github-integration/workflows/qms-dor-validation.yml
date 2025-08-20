@@ -1,0 +1,588 @@
++++
+# --- Basic Metadata ---
+id = "qms-dor-validation-workflow"
+title = "QMS DoR Validation GitHub Actions Workflow"
+context_type = "github-workflow"
+scope = "Definition of Ready validation automation for QMS"
+target_audience = ["devops", "qms", "development-teams"]
+granularity = "detailed"
+status = "draft"
+created_date = "2025-08-16T22:05:00Z"
+updated_date = "2025-08-16T22:05:00Z"
+author = "lead-devops"
+version = "1.0"
+tags = ["qms", "github-actions", "dor-validation", "quality-gates", "pr-automation"]
+related_context = [
+    ".ruru/docs/qms/workflows/4-step-qms-review-workflow-v1.md",
+    ".ruru/modes/qms-dor-validator/qms-dor-validator.mode.md"
+]
+relevance = "Critical: Core DoR validation automation workflow"
++++
+
+# QMS DoR Validation Workflow
+
+This GitHub Actions workflow template implements Step 1 of the 4-Step QMS Review Process - Definition of Ready (DoR) validation.
+
+## Workflow File: `.github/workflows/qms-dor-validation.yml`
+
+```yaml
+name: QMS - Definition of Ready Validation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, ready_for_review]
+    branches: [main, develop, 'release/**']
+  pull_request_target:
+    types: [opened, edited, synchronize]
+    branches: [main, develop, 'release/**']
+
+env:
+  QMS_STATUS_CONTEXT: "qms/dor-validation"
+  QMS_WORKFLOW_VERSION: "1.0"
+
+jobs:
+  # Initialize QMS tracking and set initial status
+  initialize-qms-tracking:
+    name: Initialize QMS Tracking
+    runs-on: ubuntu-latest
+    outputs:
+      qms-tracking-id: ${{ steps.generate-id.outputs.tracking-id }}
+      pr-classification: ${{ steps.classify.outputs.classification }}
+    steps:
+      - name: Generate QMS Tracking ID
+        id: generate-id
+        run: |
+          TRACKING_ID="QMS-$(date +%Y%m%d)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "tracking-id=${TRACKING_ID}" >> $GITHUB_OUTPUT
+          echo "Generated QMS Tracking ID: ${TRACKING_ID}"
+
+      - name: Set Initial Status - Pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'pending',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'DoR validation in progress...',
+              context: process.env.QMS_STATUS_CONTEXT
+            });
+
+      - name: Classify PR Type
+        id: classify
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          if [[ $PR_TITLE =~ ^(feat|feature): ]]; then
+            echo "classification=feature" >> $GITHUB_OUTPUT
+          elif [[ $PR_TITLE =~ ^(fix|bugfix): ]]; then
+            echo "classification=bugfix" >> $GITHUB_OUTPUT
+          elif [[ $PR_TITLE =~ ^(hotfix): ]]; then
+            echo "classification=hotfix" >> $GITHUB_OUTPUT
+          else
+            echo "classification=other" >> $GITHUB_OUTPUT
+          fi
+
+  # Validate PR metadata and structure
+  validate-pr-metadata:
+    name: Validate PR Metadata
+    runs-on: ubuntu-latest
+    needs: initialize-qms-tracking
+    outputs:
+      metadata-valid: ${{ steps.validate.outputs.valid }}
+      validation-errors: ${{ steps.validate.outputs.errors }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR Title Format
+        id: validate-title
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          CONVENTIONAL_PATTERN="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .+"
+          
+          if [[ $PR_TITLE =~ $CONVENTIONAL_PATTERN ]]; then
+            echo "title-valid=true" >> $GITHUB_OUTPUT
+            echo "✅ PR title follows conventional format"
+          else
+            echo "title-valid=false" >> $GITHUB_OUTPUT
+            echo "❌ PR title must follow conventional format: type(scope): description"
+            echo "title-error=Invalid title format" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate PR Description
+        id: validate-description
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          MIN_LENGTH=50
+          
+          if [[ ${#PR_BODY} -ge $MIN_LENGTH ]]; then
+            echo "description-valid=true" >> $GITHUB_OUTPUT
+            echo "✅ PR description meets minimum length requirement"
+          else
+            echo "description-valid=false" >> $GITHUB_OUTPUT
+            echo "❌ PR description must be at least $MIN_LENGTH characters"
+            echo "description-error=Description too short" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Required Labels
+        id: validate-labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(label => label.name);
+            const requiredLabels = ['qms-tracked'];
+            const missingLabels = requiredLabels.filter(label => !labels.includes(label));
+            
+            if (missingLabels.length === 0) {
+              core.setOutput('labels-valid', 'true');
+              console.log('✅ All required labels are present');
+            } else {
+              core.setOutput('labels-valid', 'false');
+              core.setOutput('labels-error', `Missing labels: ${missingLabels.join(', ')}`);
+              console.log(`❌ Missing required labels: ${missingLabels.join(', ')}`);
+            }
+
+      - name: Consolidate Validation Results
+        id: validate
+        run: |
+          TITLE_VALID="${{ steps.validate-title.outputs.title-valid }}"
+          DESC_VALID="${{ steps.validate-description.outputs.description-valid }}"
+          LABELS_VALID="${{ steps.validate-labels.outputs.labels-valid }}"
+          
+          ERRORS=()
+          if [[ $TITLE_VALID != "true" ]]; then
+            ERRORS+=("${{ steps.validate-title.outputs.title-error }}")
+          fi
+          if [[ $DESC_VALID != "true" ]]; then
+            ERRORS+=("${{ steps.validate-description.outputs.description-error }}")
+          fi
+          if [[ $LABELS_VALID != "true" ]]; then
+            ERRORS+=("${{ steps.validate-labels.outputs.labels-error }}")
+          fi
+          
+          if [[ ${#ERRORS[@]} -eq 0 ]]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ All metadata validation checks passed"
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            ERROR_STRING=$(IFS='; '; echo "${ERRORS[*]}")
+            echo "errors=${ERROR_STRING}" >> $GITHUB_OUTPUT
+            echo "❌ Metadata validation failed: ${ERROR_STRING}"
+          fi
+
+  # Validate branch strategy compliance
+  validate-branch-strategy:
+    name: Validate Branch Strategy
+    runs-on: ubuntu-latest
+    needs: initialize-qms-tracking
+    outputs:
+      branch-valid: ${{ steps.validate.outputs.valid }}
+      branch-errors: ${{ steps.validate.outputs.errors }}
+    steps:
+      - name: Validate Branch Names
+        id: validate
+        run: |
+          SOURCE_BRANCH="${{ github.event.pull_request.head.ref }}"
+          TARGET_BRANCH="${{ github.event.pull_request.base.ref }}"
+          
+          # Valid source branch patterns
+          VALID_PATTERNS=(
+            "^feature/.+"
+            "^bugfix/.+"
+            "^hotfix/.+"
+            "^chore/.+"
+            "^docs/.+"
+          )
+          
+          BRANCH_VALID=false
+          for pattern in "${VALID_PATTERNS[@]}"; do
+            if [[ $SOURCE_BRANCH =~ $pattern ]]; then
+              BRANCH_VALID=true
+              break
+            fi
+          done
+          
+          # Valid target branches
+          VALID_TARGETS=("main" "develop")
+          TARGET_VALID=false
+          for target in "${VALID_TARGETS[@]}"; do
+            if [[ $TARGET_BRANCH == $target ]] || [[ $TARGET_BRANCH =~ ^release/.+ ]]; then
+              TARGET_VALID=true
+              break
+            fi
+          done
+          
+          if [[ $BRANCH_VALID == true && $TARGET_VALID == true ]]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Branch naming strategy is compliant"
+          else
+            ERRORS=()
+            if [[ $BRANCH_VALID != true ]]; then
+              ERRORS+=("Source branch '$SOURCE_BRANCH' doesn't follow naming convention")
+            fi
+            if [[ $TARGET_VALID != true ]]; then
+              ERRORS+=("Target branch '$TARGET_BRANCH' is not valid")
+            fi
+            ERROR_STRING=$(IFS='; '; echo "${ERRORS[*]}")
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "errors=${ERROR_STRING}" >> $GITHUB_OUTPUT
+            echo "❌ Branch strategy validation failed: ${ERROR_STRING}"
+          fi
+
+  # Perform initial code quality checks
+  validate-code-quality:
+    name: Validate Initial Code Quality
+    runs-on: ubuntu-latest
+    needs: initialize-qms-tracking
+    outputs:
+      quality-valid: ${{ steps.validate.outputs.valid }}
+      quality-errors: ${{ steps.validate.outputs.errors }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js (if applicable)
+        if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies (if applicable)
+        if: hashFiles('package.json') != ''
+        run: npm ci
+
+      - name: Run Linting
+        id: lint
+        continue-on-error: true
+        run: |
+          if [[ -f "package.json" ]] && npm list eslint &>/dev/null; then
+            npm run lint 2>&1 | tee lint-output.txt
+            LINT_EXIT_CODE=${PIPESTATUS[0]}
+            echo "lint-exit-code=${LINT_EXIT_CODE}" >> $GITHUB_OUTPUT
+          else
+            echo "lint-exit-code=0" >> $GITHUB_OUTPUT
+            echo "No linting configuration found, skipping..."
+          fi
+
+      - name: Check for Security Vulnerabilities
+        id: security
+        run: |
+          if [[ -f "package.json" ]]; then
+            npm audit --audit-level=high 2>&1 | tee security-output.txt
+            AUDIT_EXIT_CODE=${PIPESTATUS[0]}
+            echo "security-exit-code=${AUDIT_EXIT_CODE}" >> $GITHUB_OUTPUT
+          else
+            echo "security-exit-code=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate Code Compilation
+        id: compile
+        continue-on-error: true
+        run: |
+          if [[ -f "package.json" ]] && npm list typescript &>/dev/null; then
+            npm run build 2>&1 | tee build-output.txt
+            BUILD_EXIT_CODE=${PIPESTATUS[0]}
+            echo "build-exit-code=${BUILD_EXIT_CODE}" >> $GITHUB_OUTPUT
+          else
+            echo "build-exit-code=0" >> $GITHUB_OUTPUT
+            echo "No TypeScript build found, skipping..."
+          fi
+
+      - name: Consolidate Quality Results
+        id: validate
+        run: |
+          LINT_CODE="${{ steps.lint.outputs.lint-exit-code }}"
+          SECURITY_CODE="${{ steps.security.outputs.security-exit-code }}"
+          BUILD_CODE="${{ steps.compile.outputs.build-exit-code }}"
+          
+          ERRORS=()
+          if [[ $LINT_CODE != "0" ]]; then
+            ERRORS+=("Linting failed")
+          fi
+          if [[ $SECURITY_CODE != "0" ]]; then
+            ERRORS+=("Security vulnerabilities found")
+          fi
+          if [[ $BUILD_CODE != "0" ]]; then
+            ERRORS+=("Code compilation failed")
+          fi
+          
+          if [[ ${#ERRORS[@]} -eq 0 ]]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ All code quality checks passed"
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            ERROR_STRING=$(IFS='; '; echo "${ERRORS[*]}")
+            echo "errors=${ERROR_STRING}" >> $GITHUB_OUTPUT
+            echo "❌ Code quality validation failed: ${ERROR_STRING}"
+          fi
+
+  # Check QMS template compliance
+  validate-qms-templates:
+    name: Validate QMS Template Compliance
+    runs-on: ubuntu-latest
+    needs: initialize-qms-tracking
+    outputs:
+      template-valid: ${{ steps.validate.outputs.valid }}
+      template-errors: ${{ steps.validate.outputs.errors }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check PR Template Usage
+        id: validate
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          
+          # Check for required sections in PR description
+          REQUIRED_SECTIONS=("## Description" "## Changes" "## Testing")
+          MISSING_SECTIONS=()
+          
+          for section in "${REQUIRED_SECTIONS[@]}"; do
+            if [[ $PR_BODY != *"$section"* ]]; then
+              MISSING_SECTIONS+=("$section")
+            fi
+          done
+          
+          # Check for QMS checklist
+          if [[ $PR_BODY != *"- [ ]"* ]] && [[ $PR_BODY != *"- [x]"* ]]; then
+            MISSING_SECTIONS+=("QMS Checklist")
+          fi
+          
+          if [[ ${#MISSING_SECTIONS[@]} -eq 0 ]]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ QMS template compliance validated"
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            ERROR_STRING="Missing sections: $(IFS=', '; echo "${MISSING_SECTIONS[*]}")"
+            echo "errors=${ERROR_STRING}" >> $GITHUB_OUTPUT
+            echo "❌ QMS template validation failed: ${ERROR_STRING}"
+          fi
+
+  # Final DoR validation and status update
+  finalize-dor-validation:
+    name: Finalize DoR Validation
+    runs-on: ubuntu-latest
+    needs: [initialize-qms-tracking, validate-pr-metadata, validate-branch-strategy, validate-code-quality, validate-qms-templates]
+    steps:
+      - name: Evaluate Overall DoR Status
+        id: evaluate
+        run: |
+          METADATA_VALID="${{ needs.validate-pr-metadata.outputs.metadata-valid }}"
+          BRANCH_VALID="${{ needs.validate-branch-strategy.outputs.branch-valid }}"
+          QUALITY_VALID="${{ needs.validate-code-quality.outputs.quality-valid }}"
+          TEMPLATE_VALID="${{ needs.validate-qms-templates.outputs.template-valid }}"
+          
+          if [[ $METADATA_VALID == "true" && $BRANCH_VALID == "true" && $QUALITY_VALID == "true" && $TEMPLATE_VALID == "true" ]]; then
+            echo "overall-status=success" >> $GITHUB_OUTPUT
+            echo "description=All DoR validations passed - Ready for development" >> $GITHUB_OUTPUT
+          else
+            echo "overall-status=failure" >> $GITHUB_OUTPUT
+            
+            FAILURES=()
+            if [[ $METADATA_VALID != "true" ]]; then
+              FAILURES+=("Metadata: ${{ needs.validate-pr-metadata.outputs.validation-errors }}")
+            fi
+            if [[ $BRANCH_VALID != "true" ]]; then
+              FAILURES+=("Branch: ${{ needs.validate-branch-strategy.outputs.branch-errors }}")
+            fi
+            if [[ $QUALITY_VALID != "true" ]]; then
+              FAILURES+=("Quality: ${{ needs.validate-code-quality.outputs.quality-errors }}")
+            fi
+            if [[ $TEMPLATE_VALID != "true" ]]; then
+              FAILURES+=("Template: ${{ needs.validate-qms-templates.outputs.template-errors }}")
+            fi
+            
+            ERROR_DESC=$(IFS=' | '; echo "${FAILURES[*]}")
+            echo "description=DoR validation failed: ${ERROR_DESC}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Commit Status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.evaluate.outputs.overall-status }}';
+            const description = '${{ steps.evaluate.outputs.description }}';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: status,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: description.substring(0, 140),
+              context: process.env.QMS_STATUS_CONTEXT
+            });
+
+      - name: Add QMS Labels
+        if: steps.evaluate.outputs.overall-status == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['qms:dor-passed', 'qms:ready-for-development']
+            });
+
+      - name: Add Failure Labels
+        if: steps.evaluate.outputs.overall-status == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['qms:dor-failed', 'qms:blocked']
+            });
+
+      - name: Post DoR Status Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.evaluate.outputs.overall-status }}';
+            const trackingId = '${{ needs.initialize-qms-tracking.outputs.qms-tracking-id }}';
+            const description = '${{ steps.evaluate.outputs.description }}';
+            
+            const emoji = status === 'success' ? '✅' : '❌';
+            const statusText = status === 'success' ? 'PASSED' : 'FAILED';
+            
+            const commentBody = `## ${emoji} QMS DoR Validation ${statusText}
+
+**Tracking ID:** \`${trackingId}\`
+**Status:** ${description}
+
+### Validation Results:
+- **PR Metadata:** ${{ needs.validate-pr-metadata.outputs.metadata-valid == 'true' && '✅ Passed' || '❌ Failed' }}
+- **Branch Strategy:** ${{ needs.validate-branch-strategy.outputs.branch-valid == 'true' && '✅ Passed' || '❌ Failed' }}  
+- **Code Quality:** ${{ needs.validate-code-quality.outputs.quality-valid == 'true' && '✅ Passed' || '❌ Failed' }}
+- **QMS Templates:** ${{ needs.validate-qms-templates.outputs.template-valid == 'true' && '✅ Passed' || '❌ Failed' }}
+
+${status === 'failure' ? '**Action Required:** Please address the validation failures before proceeding with development.' : '**Next Steps:** This PR is ready for development. Progress will be monitored continuously.'}
+
+---
+*QMS Workflow v${{ env.QMS_WORKFLOW_VERSION }} - Step 1: DoR Validation*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: commentBody
+            });
+```
+
+## Configuration Options
+
+### Environment Variables
+- `QMS_STATUS_CONTEXT`: The status check context name (default: "qms/dor-validation")
+- `QMS_WORKFLOW_VERSION`: Version identifier for tracking
+
+### Customizable Validation Rules
+
+#### Title Format Patterns
+Modify the `CONVENTIONAL_PATTERN` in the validate-title step:
+```bash
+CONVENTIONAL_PATTERN="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .+"
+```
+
+#### Branch Naming Conventions
+Update `VALID_PATTERNS` array in validate-branch-strategy:
+```bash
+VALID_PATTERNS=(
+  "^feature/.+"
+  "^bugfix/.+"
+  "^hotfix/.+"
+  "^chore/.+"
+  "^docs/.+"
+)
+```
+
+#### Required Labels
+Modify `requiredLabels` array in check-required-labels:
+```javascript
+const requiredLabels = ['qms-tracked'];
+```
+
+## Integration Points
+
+### Status Checks
+- Creates commit status: `qms/dor-validation`
+- States: `pending`, `success`, `failure`
+- Links to workflow run for detailed results
+
+### Labels Applied
+**Success:**
+- `qms:dor-passed`
+- `qms:ready-for-development`
+
+**Failure:**
+- `qms:dor-failed`
+- `qms:blocked`
+
+### PR Comments
+Automated comment with:
+- QMS tracking ID
+- Detailed validation results
+- Next steps guidance
+
+## Workflow Triggers
+
+### Primary Triggers
+- `pull_request.opened`
+- `pull_request.edited`
+- `pull_request.synchronize`
+- `pull_request.ready_for_review`
+
+### Target Branches
+- `main`
+- `develop`
+- `release/**`
+
+## Security Considerations
+
+### Token Permissions
+Requires `GITHUB_TOKEN` with:
+- `contents: read`
+- `pull-requests: write`
+- `statuses: write`
+- `checks: write`
+
+### Safe Practices
+- Uses `pull_request_target` for fork PRs
+- Validates all inputs
+- Limits comment length to prevent abuse
+- Sandboxed execution environment
+
+## Monitoring and Troubleshooting
+
+### Key Metrics
+- DoR pass rate
+- Average validation time
+- Common failure patterns
+
+### Debugging
+- Check workflow logs for detailed validation results
+- Review commit status API for status updates
+- Monitor PR comments for user-facing feedback
+
+## Extension Points
+
+### Custom Validations
+Add new validation jobs following the pattern:
+1. Create validation job with specific checks
+2. Add outputs for results
+3. Include in `finalize-dor-validation` needs array
+4. Update status evaluation logic
+
+### Integration with External Tools
+- Add custom actions for specialized validations
+- Integrate with SonarQube, Snyk, or other quality tools
+- Connect to project management systems for requirement validation

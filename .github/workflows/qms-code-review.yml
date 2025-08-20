@@ -1,0 +1,565 @@
+name: 🔍 QMS Automated Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, master, develop, release/*, hotfix/*]
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull Request number'
+        required: true
+        type: string
+      review_level:
+        description: 'Review intensity level'
+        required: false
+        type: string
+        default: 'comprehensive'
+    outputs:
+      review_status:
+        description: 'Overall code review status'
+        value: ${{ jobs.aggregate-review.outputs.status }}
+      review_score:
+        description: 'Code review quality score'
+        value: ${{ jobs.aggregate-review.outputs.score }}
+      critical_issues:
+        description: 'Number of critical issues found'
+        value: ${{ jobs.aggregate-review.outputs.critical_count }}
+
+# Global environment variables for code review
+env:
+  QMS_CODE_REVIEW_VERSION: "2.3.0"
+  QMS_AI_ENHANCED_REVIEW: true
+  QMS_REVIEW_ORCHESTRATOR: "github-actions"
+  
+  # Review Quality Thresholds
+  REVIEW_SCORE_THRESHOLD: 75
+  CRITICAL_ISSUES_THRESHOLD: 0
+  MAJOR_ISSUES_THRESHOLD: 5
+  
+  # AI Configuration
+  AI_REVIEW_MODEL: "claude-3-sonnet"
+  AI_CONTEXT_ANALYSIS: true
+  AI_SUGGESTION_GENERATION: true
+  
+  # Integration Endpoints
+  QMS_CODE_REVIEW_WEBHOOK: ${{ secrets.QMS_CODE_REVIEW_WEBHOOK }}
+  AI_REVIEW_SERVICE_URL: ${{ secrets.AI_REVIEW_SERVICE_URL }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  statuses: write
+  issues: write
+
+jobs:
+  # Phase 1: Multi-Language Static Code Analysis
+  static-analysis:
+    name: 🔬 Static Code Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript, typescript, python, go, rust, java, php, ruby, csharp, kotlin]
+        include:
+          - language: javascript
+            tools: "eslint,jshint,flow"
+            severity: "error,warn,info"
+            config: ".eslintrc.js,.jshintrc"
+          - language: typescript
+            tools: "tslint,typescript-eslint,tsc"
+            severity: "error,warn,info"
+            config: "tsconfig.json,.eslintrc.js"
+          - language: python
+            tools: "flake8,pylint,mypy,bandit"
+            severity: "error,warn,info"
+            config: "pyproject.toml,setup.cfg,.flake8"
+          - language: go
+            tools: "golangci-lint,go-vet,staticcheck"
+            severity: "error,warn,info"
+            config: ".golangci.yml"
+          - language: rust
+            tools: "clippy,rustfmt,cargo-audit"
+            severity: "error,warn,info"
+            config: "clippy.toml,rustfmt.toml"
+          - language: java
+            tools: "checkstyle,pmd,spotbugs,findbugs"
+            severity: "error,warn,info"
+            config: "checkstyle.xml,pmd.xml"
+          - language: php
+            tools: "phpcs,phpmd,phpstan,psalm"
+            severity: "error,warn,info"
+            config: "phpcs.xml,phpmd.xml"
+          - language: ruby
+            tools: "rubocop,reek,fasterer"
+            severity: "error,warn,info"
+            config: ".rubocop.yml"
+          - language: csharp
+            tools: "roslyn,fxcop,stylecop"
+            severity: "error,warn,info"
+            config: ".editorconfig,ruleset.xml"
+          - language: kotlin
+            tools: "ktlint,detekt,kotlinc"
+            severity: "error,warn,info"
+            config: ".editorconfig,detekt.yml"
+    
+    outputs:
+      analysis_results: ${{ steps.static-analysis.outputs.results }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 🔧 Setup Analysis Environment
+        uses: ./.github/actions/setup-language-analysis
+        with:
+          language: ${{ matrix.language }}
+          tools: ${{ matrix.tools }}
+          
+      - name: 🔬 Execute Static Analysis
+        id: static-analysis
+        run: |
+          echo "🔬 Executing ${{ matrix.language }} static analysis..."
+          
+          # Check if language files exist
+          if ! find . -name "*.${{ matrix.language }}" -type f -o -name "*.$(echo ${{ matrix.language }} | head -c 2)" -type f | head -1 | grep -q .; then
+            echo "⏭️ No ${{ matrix.language }} files found, skipping..."
+            echo "results={\"status\":\"skipped\",\"language\":\"${{ matrix.language }}\"}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Execute QMS code analysis
+          ./scripts/qms/static-code-analyzer.sh \
+            --language="${{ matrix.language }}" \
+            --tools="${{ matrix.tools }}" \
+            --severity="${{ matrix.severity }}" \
+            --config-files="${{ matrix.config }}" \
+            --ai-enhanced-analysis="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --context-analysis="${{ env.AI_CONTEXT_ANALYSIS }}" \
+            --output-format="json,sarif" \
+            --review-level="${{ github.event.inputs.review_level || 'comprehensive' }}"
+          
+          # Extract and format results
+          RESULTS=$(cat .qms/code-review/static-analysis/${{ matrix.language }}/results.json)
+          echo "results=${RESULTS}" >> $GITHUB_OUTPUT
+          
+      - name: 📤 Upload SARIF Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.static-analysis.outputs.results != ''
+        with:
+          sarif_file: .qms/code-review/static-analysis/${{ matrix.language }}/results.sarif
+          category: "qms-static-analysis-${{ matrix.language }}"
+
+  # Phase 2: AI-Enhanced Code Review
+  ai-code-review:
+    name: 🤖 AI Code Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      ai_review_status: ${{ steps.ai-review.outputs.status }}
+      ai_suggestions_count: ${{ steps.ai-review.outputs.suggestions_count }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 🤖 Execute AI Code Review
+        id: ai-review
+        run: |
+          echo "🤖 Executing AI-enhanced code review..."
+          
+          # Get changed files for focused review
+          git diff --name-only origin/${{ github.event.pull_request.base.ref }}..HEAD > .qms/changed_files.txt
+          
+          # Execute QMS AI code reviewer
+          ./scripts/qms/ai-code-reviewer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --base-branch="${{ github.event.pull_request.base.ref }}" \
+            --head-branch="${{ github.event.pull_request.head.ref }}" \
+            --ai-model="${{ env.AI_REVIEW_MODEL }}" \
+            --context-analysis="${{ env.AI_CONTEXT_ANALYSIS }}" \
+            --suggestion-generation="${{ env.AI_SUGGESTION_GENERATION }}" \
+            --review-level="${{ github.event.inputs.review_level || 'comprehensive' }}" \
+            --changed-files-list=".qms/changed_files.txt" \
+            --output-format="json,markdown"
+          
+          # Extract AI review results
+          AI_STATUS=$(cat .qms/code-review/ai-review/results.json | jq -r '.status')
+          AI_SUGGESTIONS=$(cat .qms/code-review/ai-review/results.json | jq -r '.suggestions_count')
+          
+          echo "status=${AI_STATUS}" >> $GITHUB_OUTPUT
+          echo "suggestions_count=${AI_SUGGESTIONS}" >> $GITHUB_OUTPUT
+          
+      - name: 💬 Post AI Review Comments
+        if: steps.ai-review.outputs.status == 'completed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reviewComments = JSON.parse(fs.readFileSync('.qms/code-review/ai-review/comments.json', 'utf8'));
+            
+            for (const comment of reviewComments) {
+              await github.rest.pulls.createReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                commit_id: comment.commit_id,
+                path: comment.path,
+                line: comment.line,
+                body: `🤖 **AI Code Review Suggestion**\n\n${comment.body}\n\n---\n*Generated by QMS AI Code Reviewer v${{ env.QMS_CODE_REVIEW_VERSION }}*`
+              });
+            }
+
+  # Phase 3: Code Complexity & Maintainability Analysis
+  complexity-analysis:
+    name: 📊 Complexity Analysis
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      complexity_status: ${{ steps.complexity.outputs.status }}
+      complexity_score: ${{ steps.complexity.outputs.score }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 📊 Execute Complexity Analysis
+        id: complexity
+        run: |
+          echo "📊 Executing code complexity and maintainability analysis..."
+          
+          # Execute QMS complexity analyzer
+          ./scripts/qms/complexity-analyzer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --analysis-types="cyclomatic,cognitive,halstead,maintainability" \
+            --thresholds-config=".qms/config/complexity-thresholds.json" \
+            --ai-enhanced-metrics="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-format="json,html" \
+            --trend-analysis=true
+          
+          # Extract complexity results
+          COMPLEXITY_STATUS=$(cat .qms/code-review/complexity/results.json | jq -r '.status')
+          COMPLEXITY_SCORE=$(cat .qms/code-review/complexity/results.json | jq -r '.overall_score')
+          
+          echo "status=${COMPLEXITY_STATUS}" >> $GITHUB_OUTPUT
+          echo "score=${COMPLEXITY_SCORE}" >> $GITHUB_OUTPUT
+
+  # Phase 4: Code Pattern & Architecture Review
+  architecture-review:
+    name: 🏗️ Architecture Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      architecture_status: ${{ steps.architecture.outputs.status }}
+      pattern_violations: ${{ steps.architecture.outputs.violations }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 🏗️ Execute Architecture Review
+        id: architecture
+        run: |
+          echo "🏗️ Executing architecture and design pattern review..."
+          
+          # Execute QMS architecture reviewer
+          ./scripts/qms/architecture-reviewer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --patterns-config=".qms/config/architecture-patterns.json" \
+            --anti-patterns-detection=true \
+            --dependency-analysis=true \
+            --layer-violation-detection=true \
+            --ai-architecture-analysis="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-format="json,diagram"
+          
+          # Extract architecture results
+          ARCH_STATUS=$(cat .qms/code-review/architecture/results.json | jq -r '.status')
+          VIOLATIONS_COUNT=$(cat .qms/code-review/architecture/results.json | jq -r '.violations_count')
+          
+          echo "status=${ARCH_STATUS}" >> $GITHUB_OUTPUT
+          echo "violations=${VIOLATIONS_COUNT}" >> $GITHUB_OUTPUT
+
+  # Phase 5: Performance & Security Code Review
+  performance-security-review:
+    name: ⚡🔒 Performance & Security Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      perf_security_status: ${{ steps.perf-sec.outputs.status }}
+      performance_issues: ${{ steps.perf-sec.outputs.perf_issues }}
+      security_issues: ${{ steps.perf-sec.outputs.sec_issues }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: ⚡🔒 Execute Performance & Security Review
+        id: perf-sec
+        run: |
+          echo "⚡🔒 Executing performance and security code review..."
+          
+          # Execute QMS performance & security reviewer
+          ./scripts/qms/performance-security-reviewer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --performance-patterns=".qms/config/performance-patterns.json" \
+            --security-patterns=".qms/config/security-patterns.json" \
+            --owasp-compliance="${{ env.OWASP_COMPLIANCE_YEAR || '2021' }}" \
+            --performance-profiling=true \
+            --ai-performance-analysis="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-format="json,report"
+          
+          # Extract performance & security results
+          PERF_SEC_STATUS=$(cat .qms/code-review/perf-security/results.json | jq -r '.status')
+          PERF_ISSUES=$(cat .qms/code-review/perf-security/results.json | jq -r '.performance_issues_count')
+          SEC_ISSUES=$(cat .qms/code-review/perf-security/results.json | jq -r '.security_issues_count')
+          
+          echo "status=${PERF_SEC_STATUS}" >> $GITHUB_OUTPUT
+          echo "perf_issues=${PERF_ISSUES}" >> $GITHUB_OUTPUT
+          echo "sec_issues=${SEC_ISSUES}" >> $GITHUB_OUTPUT
+
+  # Phase 6: Test Quality & Coverage Review
+  test-quality-review:
+    name: 🧪 Test Quality Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      test_quality_status: ${{ steps.test-quality.outputs.status }}
+      test_quality_score: ${{ steps.test-quality.outputs.score }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 🧪 Execute Test Quality Review
+        id: test-quality
+        run: |
+          echo "🧪 Executing test quality and coverage review..."
+          
+          # Execute QMS test quality reviewer
+          ./scripts/qms/test-quality-reviewer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --test-frameworks-config=".qms/config/test-frameworks.json" \
+            --coverage-analysis=true \
+            --test-pattern-analysis=true \
+            --test-maintainability=true \
+            --ai-test-suggestions="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-format="json,coverage-report"
+          
+          # Extract test quality results
+          TEST_STATUS=$(cat .qms/code-review/test-quality/results.json | jq -r '.status')
+          TEST_SCORE=$(cat .qms/code-review/test-quality/results.json | jq -r '.quality_score')
+          
+          echo "status=${TEST_STATUS}" >> $GITHUB_OUTPUT
+          echo "score=${TEST_SCORE}" >> $GITHUB_OUTPUT
+
+  # Phase 7: Documentation & Comments Review
+  documentation-review:
+    name: 📝 Documentation Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis]
+    
+    outputs:
+      docs_status: ${{ steps.docs-review.outputs.status }}
+      docs_coverage: ${{ steps.docs-review.outputs.coverage }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 📝 Execute Documentation Review
+        id: docs-review
+        run: |
+          echo "📝 Executing documentation and comments review..."
+          
+          # Execute QMS documentation reviewer
+          ./scripts/qms/documentation-reviewer.sh \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --doc-standards-config=".qms/config/documentation-standards.json" \
+            --comment-quality-analysis=true \
+            --api-documentation-check=true \
+            --readme-analysis=true \
+            --ai-doc-suggestions="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-format="json,html"
+          
+          # Extract documentation results
+          DOCS_STATUS=$(cat .qms/code-review/documentation/results.json | jq -r '.status')
+          DOCS_COVERAGE=$(cat .qms/code-review/documentation/results.json | jq -r '.coverage_percentage')
+          
+          echo "status=${DOCS_STATUS}" >> $GITHUB_OUTPUT
+          echo "coverage=${DOCS_COVERAGE}" >> $GITHUB_OUTPUT
+
+  # Phase 8: Aggregate Review Results
+  aggregate-review:
+    name: 🎯 Aggregate Code Review
+    runs-on: ubuntu-latest
+    needs: [static-analysis, ai-code-review, complexity-analysis, architecture-review, performance-security-review, test-quality-review, documentation-review]
+    if: always()
+    
+    outputs:
+      status: ${{ steps.aggregate.outputs.status }}
+      score: ${{ steps.aggregate.outputs.score }}
+      critical_count: ${{ steps.aggregate.outputs.critical_count }}
+      
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: 🎯 Aggregate Review Results
+        id: aggregate
+        run: |
+          echo "🎯 Aggregating comprehensive code review results..."
+          
+          # Collect all review results
+          STATIC_RESULTS='${{ toJson(needs.static-analysis.outputs) }}'
+          AI_STATUS="${{ needs.ai-code-review.outputs.ai_review_status || 'skipped' }}"
+          AI_SUGGESTIONS="${{ needs.ai-code-review.outputs.ai_suggestions_count || '0' }}"
+          COMPLEXITY_STATUS="${{ needs.complexity-analysis.outputs.complexity_status }}"
+          COMPLEXITY_SCORE="${{ needs.complexity-analysis.outputs.complexity_score }}"
+          ARCHITECTURE_STATUS="${{ needs.architecture-review.outputs.architecture_status }}"
+          PATTERN_VIOLATIONS="${{ needs.architecture-review.outputs.pattern_violations }}"
+          PERF_SEC_STATUS="${{ needs.performance-security-review.outputs.perf_security_status }}"
+          PERF_ISSUES="${{ needs.performance-security-review.outputs.performance_issues }}"
+          SEC_ISSUES="${{ needs.performance-security-review.outputs.security_issues }}"
+          TEST_STATUS="${{ needs.test-quality-review.outputs.test_quality_status }}"
+          TEST_SCORE="${{ needs.test-quality-review.outputs.test_quality_score }}"
+          DOCS_STATUS="${{ needs.documentation-review.outputs.docs_status }}"
+          DOCS_COVERAGE="${{ needs.documentation-review.outputs.docs_coverage }}"
+          
+          # Execute QMS review aggregator
+          ./scripts/qms/code-review-aggregator.sh \
+            --static-results="${STATIC_RESULTS}" \
+            --ai-status="${AI_STATUS}" \
+            --ai-suggestions="${AI_SUGGESTIONS}" \
+            --complexity-status="${COMPLEXITY_STATUS}" \
+            --complexity-score="${COMPLEXITY_SCORE}" \
+            --architecture-status="${ARCHITECTURE_STATUS}" \
+            --pattern-violations="${PATTERN_VIOLATIONS}" \
+            --perf-sec-status="${PERF_SEC_STATUS}" \
+            --performance-issues="${PERF_ISSUES}" \
+            --security-issues="${SEC_ISSUES}" \
+            --test-status="${TEST_STATUS}" \
+            --test-score="${TEST_SCORE}" \
+            --docs-status="${DOCS_STATUS}" \
+            --docs-coverage="${DOCS_COVERAGE}" \
+            --review-threshold="${{ env.REVIEW_SCORE_THRESHOLD }}" \
+            --critical-threshold="${{ env.CRITICAL_ISSUES_THRESHOLD }}" \
+            --output-format="json,summary"
+          
+          # Extract aggregated results
+          OVERALL_STATUS=$(cat .qms/code-review/aggregate/results.json | jq -r '.overall_status')
+          OVERALL_SCORE=$(cat .qms/code-review/aggregate/results.json | jq -r '.overall_score')
+          CRITICAL_COUNT=$(cat .qms/code-review/aggregate/results.json | jq -r '.critical_issues_count')
+          
+          echo "status=${OVERALL_STATUS}" >> $GITHUB_OUTPUT
+          echo "score=${OVERALL_SCORE}" >> $GITHUB_OUTPUT
+          echo "critical_count=${CRITICAL_COUNT}" >> $GITHUB_OUTPUT
+
+  # Phase 9: Generate Review Report
+  generate-review-report:
+    name: 📋 Generate Review Report
+    runs-on: ubuntu-latest
+    needs: [aggregate-review]
+    if: always()
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: 📋 Generate Comprehensive Review Report
+        run: |
+          echo "📋 Generating comprehensive code review report..."
+          
+          # Execute QMS review report generator
+          ./scripts/qms/review-report-generator.sh \
+            --review-results=".qms/code-review/aggregate/results.json" \
+            --pr-number="${{ github.event.pull_request.number || github.event.inputs.pr_number }}" \
+            --report-formats="html,pdf,json,markdown" \
+            --include-metrics=true \
+            --include-trends=true \
+            --include-recommendations=true \
+            --ai-insights="${{ env.QMS_AI_ENHANCED_REVIEW }}" \
+            --output-dir=".qms/code-review/reports"
+            
+      - name: 💬 Update PR with Review Summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('.qms/code-review/aggregate/results.json', 'utf8'));
+            
+            const comment = `
+            ## 🔍 QMS Automated Code Review Report
+            
+            ### 📊 Overall Assessment
+            | Metric | Score/Status | Target | Result |
+            |--------|--------------|--------|--------|
+            | **Overall Status** | ${{ needs.aggregate-review.outputs.status }} | ✅ PASS | ${results.overall_status === 'PASS' ? '✅' : '❌'} |
+            | **Quality Score** | ${{ needs.aggregate-review.outputs.score }}% | ≥${{ env.REVIEW_SCORE_THRESHOLD }}% | ${results.overall_score >= ${{ env.REVIEW_SCORE_THRESHOLD }} ? '✅' : '❌'} |
+            | **Critical Issues** | ${{ needs.aggregate-review.outputs.critical_count }} | ≤${{ env.CRITICAL_ISSUES_THRESHOLD }} | ${results.critical_issues_count <= ${{ env.CRITICAL_ISSUES_THRESHOLD }} ? '✅' : '❌'} |
+            
+            ### 🔍 Review Categories
+            | Category | Status | Details |
+            |----------|--------|---------|
+            | 🔬 **Static Analysis** | ${{ needs.static-analysis.result }} | Multi-language analysis completed |
+            | 🤖 **AI Review** | ${{ needs.ai-code-review.outputs.ai_review_status || 'skipped' }} | ${{ needs.ai-code-review.outputs.ai_suggestions_count || '0' }} AI suggestions |
+            | 📊 **Complexity** | ${{ needs.complexity-analysis.outputs.complexity_status }} | Score: ${{ needs.complexity-analysis.outputs.complexity_score }}% |
+            | 🏗️ **Architecture** | ${{ needs.architecture-review.outputs.architecture_status }} | ${{ needs.architecture-review.outputs.pattern_violations }} pattern violations |
+            | ⚡🔒 **Performance & Security** | ${{ needs.performance-security-review.outputs.perf_security_status }} | ${{ needs.performance-security-review.outputs.perf_issues }} perf, ${{ needs.performance-security-review.outputs.security_issues }} security issues |
+            | 🧪 **Test Quality** | ${{ needs.test-quality-review.outputs.test_quality_status }} | Score: ${{ needs.test-quality-review.outputs.test_quality_score }}% |
+            | 📝 **Documentation** | ${{ needs.documentation-review.outputs.docs_status }} | Coverage: ${{ needs.documentation-review.outputs.docs_coverage }}% |
+            
+            ### 🎯 Summary
+            ${results.overall_status === 'PASS' ? 
+              '✅ **Code Review PASSED** - All quality gates met. PR approved for merge.' : 
+              '❌ **Code Review FAILED** - Quality issues identified. Please address before merge.'}
+            
+            ${results.ai_insights_available ? '🤖 **AI-Enhanced Analysis**: Advanced insights and suggestions provided' : ''}
+            
+            ---
+            *QMS Automated Code Review v${{ env.QMS_CODE_REVIEW_VERSION }} | AI-Enhanced: ${{ env.QMS_AI_ENHANCED_REVIEW }}*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+      - name: 📤 Upload Review Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qms-code-review-results
+          path: |
+            .qms/code-review/
+            !.qms/code-review/**/secrets/
+          retention-days: 30
+          
+      - name: ❌ Fail on Critical Issues
+        if: needs.aggregate-review.outputs.critical_count > env.CRITICAL_ISSUES_THRESHOLD || needs.aggregate-review.outputs.score < env.REVIEW_SCORE_THRESHOLD
+        run: |
+          echo "❌ Code review failed quality thresholds"
+          echo "Critical Issues: ${{ needs.aggregate-review.outputs.critical_count }} (max: ${{ env.CRITICAL_ISSUES_THRESHOLD }})"
+          echo "Quality Score: ${{ needs.aggregate-review.outputs.score }}% (min: ${{ env.REVIEW_SCORE_THRESHOLD }}%)"
+          exit 1

@@ -4,7 +4,8 @@
     "@iarna/toml": "^2.2.5",
     "@types/bun": "^1.2.11",
     "@types/node": "^22.15.3",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "typescript": "^5.9.2"
   },
   "dependencies": {
     "archiver": "^7.0.1",

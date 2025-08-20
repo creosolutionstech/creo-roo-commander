@@ -1,0 +1,347 @@
+name: 'QMS Dashboard Update'
+description: 'Update QMS dashboard with workflow results and metrics'
+branding:
+  icon: 'bar-chart-2'
+  color: 'green'
+
+inputs:
+  dashboard-url:
+    description: 'QMS Dashboard URL'
+    required: true
+  api-token:
+    description: 'QMS API authentication token'
+    required: true
+  workflow-name:
+    description: 'Name of the workflow generating the data'
+    required: true
+  workflow-run-id:
+    description: 'GitHub workflow run ID'
+    required: false
+    default: ${{ github.run_id }}
+  results-data:
+    description: 'JSON string containing workflow results'
+    required: true
+  update-type:
+    description: 'Type of update (quality-gates, security, coverage, compliance, code-review)'
+    required: true
+  project-id:
+    description: 'Project identifier in QMS dashboard'
+    required: false
+    default: ${{ github.repository }}
+  branch:
+    description: 'Git branch name'
+    required: false
+    default: ${{ github.ref_name }}
+  commit-sha:
+    description: 'Git commit SHA'
+    required: false
+    default: ${{ github.sha }}
+  retry-count:
+    description: 'Number of retry attempts for failed API calls'
+    required: false
+    default: '3'
+  timeout:
+    description: 'API call timeout in seconds'
+    required: false
+    default: '30'
+
+outputs:
+  update-status:
+    description: 'Status of the dashboard update (success, failed, partial)'
+    value: ${{ steps.update.outputs.status }}
+  dashboard-url:
+    description: 'Direct URL to the updated dashboard view'
+    value: ${{ steps.update.outputs.dashboard-url }}
+  metrics-id:
+    description: 'Unique ID assigned to this metrics update'
+    value: ${{ steps.update.outputs.metrics-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        echo "🔍 Validating dashboard update inputs..."
+        
+        # Validate update type
+        case "${{ inputs.update-type }}" in
+          "quality-gates"|"security"|"coverage"|"compliance"|"code-review")
+            echo "✅ Valid update type: ${{ inputs.update-type }}"
+            ;;
+          *)
+            echo "❌ Invalid update type: ${{ inputs.update-type }}"
+            echo "Valid options: quality-gates, security, coverage, compliance, code-review"
+            exit 1
+            ;;
+        esac
+        
+        # Validate API token format
+        if [[ -z "${{ inputs.api-token }}" ]]; then
+          echo "❌ QMS API token is required"
+          exit 1
+        fi
+        
+        # Validate dashboard URL
+        if [[ ! "${{ inputs.dashboard-url }}" =~ ^https?:// ]]; then
+          echo "❌ Invalid dashboard URL format"
+          exit 1
+        fi
+        
+        # Validate JSON results data
+        if ! echo '${{ inputs.results-data }}' | python3 -m json.tool > /dev/null 2>&1; then
+          echo "❌ Invalid JSON format in results-data"
+          exit 1
+        fi
+        
+        echo "✅ Input validation completed"
+
+    - name: Setup Python for API Integration
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Dashboard Update Dependencies
+      shell: bash
+      run: |
+        echo "📦 Installing dashboard update dependencies..."
+        pip install --quiet --upgrade pip
+        pip install --quiet requests python-dateutil jinja2 pyyaml
+
+    - name: Prepare Dashboard Update Payload
+      shell: bash
+      run: |
+        echo "📋 Preparing dashboard update payload..."
+        
+        # Create payload directory
+        mkdir -p /tmp/qms-dashboard
+        
+        # Generate update payload
+        cat > /tmp/qms-dashboard/update_payload.py << 'EOF'
+        import json
+        import os
+        from datetime import datetime, timezone
+        import sys
+        
+        def create_payload():
+            # Parse input data
+            results_data = json.loads(os.environ.get('RESULTS_DATA', '{}'))
+            
+            # Build comprehensive payload
+            payload = {
+                "metadata": {
+                    "workflow_name": os.environ.get('WORKFLOW_NAME'),
+                    "workflow_run_id": os.environ.get('WORKFLOW_RUN_ID'),
+                    "update_type": os.environ.get('UPDATE_TYPE'),
+                    "project_id": os.environ.get('PROJECT_ID'),
+                    "branch": os.environ.get('BRANCH'),
+                    "commit_sha": os.environ.get('COMMIT_SHA'),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "github_actor": os.environ.get('GITHUB_ACTOR', 'unknown'),
+                    "github_event_name": os.environ.get('GITHUB_EVENT_NAME', 'unknown')
+                },
+                "results": results_data,
+                "links": {
+                    "workflow_run": f"https://github.com/{os.environ.get('PROJECT_ID')}/actions/runs/{os.environ.get('WORKFLOW_RUN_ID')}",
+                    "commit": f"https://github.com/{os.environ.get('PROJECT_ID')}/commit/{os.environ.get('COMMIT_SHA')}"
+                }
+            }
+            
+            # Add update-type specific metadata
+            update_type = os.environ.get('UPDATE_TYPE')
+            if update_type == 'quality-gates':
+                payload['qms_category'] = 'Quality Assurance'
+                payload['priority'] = 'high'
+            elif update_type == 'security':
+                payload['qms_category'] = 'Security'
+                payload['priority'] = 'critical'
+            elif update_type == 'coverage':
+                payload['qms_category'] = 'Testing'
+                payload['priority'] = 'medium'
+            elif update_type == 'compliance':
+                payload['qms_category'] = 'Compliance'
+                payload['priority'] = 'high'
+            elif update_type == 'code-review':
+                payload['qms_category'] = 'Code Quality'
+                payload['priority'] = 'medium'
+            
+            return payload
+        
+        if __name__ == "__main__":
+            try:
+                payload = create_payload()
+                print(json.dumps(payload, indent=2))
+            except Exception as e:
+                print(f"Error creating payload: {e}", file=sys.stderr)
+                sys.exit(1)
+        EOF
+        
+        # Set environment variables for payload generation
+        export RESULTS_DATA='${{ inputs.results-data }}'
+        export WORKFLOW_NAME='${{ inputs.workflow-name }}'
+        export WORKFLOW_RUN_ID='${{ inputs.workflow-run-id }}'
+        export UPDATE_TYPE='${{ inputs.update-type }}'
+        export PROJECT_ID='${{ inputs.project-id }}'
+        export BRANCH='${{ inputs.branch }}'
+        export COMMIT_SHA='${{ inputs.commit-sha }}'
+        
+        # Generate payload
+        python3 /tmp/qms-dashboard/update_payload.py > /tmp/qms-dashboard/payload.json
+        
+        echo "✅ Dashboard payload prepared"
+
+    - name: Update QMS Dashboard
+      id: update
+      shell: bash
+      run: |
+        echo "🚀 Updating QMS dashboard..."
+        
+        # Create dashboard update script
+        cat > /tmp/qms-dashboard/update_dashboard.py << 'EOF'
+        import json
+        import requests
+        import time
+        import sys
+        import os
+        from datetime import datetime
+        
+        def update_dashboard(payload_file, dashboard_url, api_token, retry_count, timeout):
+            # Load payload
+            with open(payload_file, 'r') as f:
+                payload = json.load(f)
+            
+            headers = {
+                'Authorization': f'Bearer {api_token}',
+                'Content-Type': 'application/json',
+                'X-QMS-Update-Type': payload['metadata']['update_type'],
+                'X-GitHub-Run-ID': payload['metadata']['workflow_run_id']
+            }
+            
+            url = f"{dashboard_url.rstrip('/')}/api/v1/metrics/update"
+            
+            for attempt in range(int(retry_count)):
+                try:
+                    print(f"📡 Attempt {attempt + 1}: Posting to {url}")
+                    
+                    response = requests.post(
+                        url,
+                        json=payload,
+                        headers=headers,
+                        timeout=int(timeout)
+                    )
+                    
+                    if response.status_code in [200, 201]:
+                        result = response.json()
+                        print(f"✅ Dashboard update successful")
+                        print(f"status=success")
+                        
+                        # Extract response data
+                        metrics_id = result.get('id', 'unknown')
+                        dashboard_view_url = result.get('dashboard_url', f"{dashboard_url}/project/{payload['metadata']['project_id']}")
+                        
+                        print(f"dashboard-url={dashboard_view_url}")
+                        print(f"metrics-id={metrics_id}")
+                        
+                        # Output to GitHub Actions
+                        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                            f.write(f"status=success\n")
+                            f.write(f"dashboard-url={dashboard_view_url}\n")
+                            f.write(f"metrics-id={metrics_id}\n")
+                        
+                        return True
+                        
+                    elif response.status_code == 422:
+                        print(f"⚠️ Validation error: {response.text}")
+                        print(f"status=partial")
+                        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                            f.write(f"status=partial\n")
+                            f.write(f"dashboard-url={dashboard_url}\n")
+                            f.write(f"metrics-id=validation-error\n")
+                        return False
+                        
+                    else:
+                        print(f"⚠️ HTTP {response.status_code}: {response.text}")
+                        if attempt < int(retry_count) - 1:
+                            wait_time = (2 ** attempt) * 5  # Exponential backoff
+                            print(f"🔄 Retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                        
+                except requests.exceptions.Timeout:
+                    print(f"⏱️ Timeout on attempt {attempt + 1}")
+                    if attempt < int(retry_count) - 1:
+                        time.sleep(10)
+                        
+                except requests.exceptions.RequestException as e:
+                    print(f"🔥 Request error on attempt {attempt + 1}: {e}")
+                    if attempt < int(retry_count) - 1:
+                        time.sleep(5)
+            
+            print(f"❌ All retry attempts failed")
+            print(f"status=failed")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"status=failed\n")
+                f.write(f"dashboard-url={dashboard_url}\n")
+                f.write(f"metrics-id=failed\n")
+            return False
+        
+        if __name__ == "__main__":
+            success = update_dashboard(
+                sys.argv[1],  # payload_file
+                sys.argv[2],  # dashboard_url
+                sys.argv[3],  # api_token
+                sys.argv[4],  # retry_count
+                sys.argv[5]   # timeout
+            )
+            sys.exit(0 if success else 1)
+        EOF
+        
+        # Execute dashboard update
+        python3 /tmp/qms-dashboard/update_dashboard.py \
+          "/tmp/qms-dashboard/payload.json" \
+          "${{ inputs.dashboard-url }}" \
+          "${{ inputs.api-token }}" \
+          "${{ inputs.retry-count }}" \
+          "${{ inputs.timeout }}" || true
+        
+        echo "📊 Dashboard update process completed"
+
+    - name: Generate Update Summary
+      shell: bash
+      run: |
+        echo "📝 Generating dashboard update summary..."
+        
+        # Create summary based on outputs
+        UPDATE_STATUS="${{ steps.update.outputs.status || 'unknown' }}"
+        DASHBOARD_URL="${{ steps.update.outputs.dashboard-url || inputs.dashboard-url }}"
+        METRICS_ID="${{ steps.update.outputs.metrics-id || 'none' }}"
+        
+        echo "## 📊 QMS Dashboard Update Summary"
+        echo ""
+        echo "- **Update Type**: ${{ inputs.update-type }}"
+        echo "- **Workflow**: ${{ inputs.workflow-name }}"
+        echo "- **Status**: ${UPDATE_STATUS}"
+        echo "- **Metrics ID**: ${METRICS_ID}"
+        echo "- **Dashboard**: [View Results](${DASHBOARD_URL})"
+        echo ""
+        
+        case "${UPDATE_STATUS}" in
+          "success")
+            echo "✅ **Result**: Dashboard successfully updated with latest metrics"
+            ;;
+          "partial")
+            echo "⚠️ **Result**: Dashboard partially updated - some validation issues occurred"
+            ;;
+          "failed")
+            echo "❌ **Result**: Dashboard update failed after multiple retry attempts"
+            ;;
+          *)
+            echo "❓ **Result**: Dashboard update status unknown"
+            ;;
+        esac
+        
+        echo ""
+        echo "**Workflow Details:**"
+        echo "- Run ID: ${{ inputs.workflow-run-id }}"
+        echo "- Branch: ${{ inputs.branch }}"
+        echo "- Commit: ${{ inputs.commit-sha }}"
+        echo "- Project: ${{ inputs.project-id }}"
