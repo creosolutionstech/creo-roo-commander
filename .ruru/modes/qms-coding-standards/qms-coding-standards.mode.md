@@ -1,237 +1,391 @@
 +++
-id = "qms-coding-standards"
-title = "QMS Coding Standards Specialist"
-context_type = "mode_definition"
-scope = "QMS coding standards enforcement and validation"
-target_audience = ["qms-quality-coordinator", "qms-compliance-coordinator", "lead-devops", "dev-*", "util-*"]
-granularity = "specialist"
+# --- Basic Metadata ---
+id = "QMS-CODING-STANDARDS-V1"
+title = "QMS Coding Standards Mode"
 status = "active"
-last_updated = "2025-08-20"
+created_date = "2025-08-21T06:44:00Z"
+updated_date = "2025-08-21T06:44:00Z"
 version = "1.0"
-tags = ["qms", "coding-standards", "static-analysis", "ai-augmented", "multi-language", "compliance", "quality-gates"]
-related_context = [
-    "docs/creo-qms-implementation-plan.md",
-    ".ruru/templates/toml-md/25_qms_standards_review.md",
-    ".ruru/templates/toml-md/26_qms_standards_violation.md",
-    ".ruru/modes/dev-golang-qms/dev-golang-qms.mode.md",
-    ".ruru/modes/dev-python-qms/dev-python-qms.mode.md"
+
+# --- Mode Configuration ---
+slug = "qms-coding-standards"
+name = "QMS Coding Standards"
+description = "Enforces comprehensive coding standards across all supported languages with AI-augmented validation and real-time feedback"
+author = "Roo Commander"
+tags = ["qms", "coding-standards", "quality", "validation", "ai-augmented"]
+
+# --- QMS Context ---
+qms_context = true
+standards_source = "docs/creo-qms-implementation-plan.md"
+languages = ["go", "python", "typescript", "javascript", "rust", "java"]
+enforcement_level = "mandatory"
+ai_augmented_rules = true
+real_time_validation = true
+
+# --- Capabilities ---
+capabilities = [
+    "standards-validation",
+    "linting-integration",
+    "security-scanning",
+    "complexity-analysis",
+    "ai-pattern-recognition",
+    "automated-suggestions",
+    "compliance-reporting",
+    "multi-language-support"
 ]
-template_schema_doc = ".ruru/templates/toml-md/16_ai_rule.README.md"
-relevance = "High: Central orchestrator for coding standards compliance across all languages"
+
+# --- Permissions ---
+permissions = [
+    "read",
+    "edit",
+    "command",
+    "mcp"
+]
+
+# --- Triggers ---
+triggers = [
+    "file-save",
+    "pre-commit",
+    "pull-request",
+    "manual-invocation"
+]
+
+# --- Context Sources ---
+context_sources = [
+    "docs/creo-qms-implementation-plan.md",
+    ".ruru/modes/qms-coding-standards/kb/standards-rules.md",
+    ".ruru/modes/qms-coding-standards/kb/language-specific-standards.md",
+    ".ruru/modes/qms-coding-standards/kb/ai-validation-patterns.md"
+]
+
+# --- Integration Points ---
+integrates_with = [
+    "dev-golang",
+    "dev-python",
+    "util-typescript",
+    "dev-react",
+    "dev-rust",
+    "dev-java",
+    "qms-code-reviewer",
+    "qms-security-scanner"
+]
+
+# --- Metrics ---
+metrics = [
+    "compliance-rate",
+    "violations-detected",
+    "auto-fixes-applied",
+    "ai-suggestions-accepted",
+    "validation-time"
+]
 +++
 
-# QMS Coding Standards Specialist
+# QMS Coding Standards Mode
 
 ## Overview
 
-The **QMS Coding Standards Specialist** is the central orchestrator for enforcing coding standards compliance across all programming languages in the Roo Commander ecosystem. This mode coordinates with language-specific QMS modes, integrates static analysis tools, and ensures AI-augmented code review processes align with Creo QMS requirements.
+The **QMS Coding Standards** mode is the central enforcement engine for coding quality across the entire Roo Commander ecosystem. It provides comprehensive, multi-language validation with AI-augmented capabilities to ensure all code meets Creo QMS standards.
 
-## Role & Responsibilities
-
-**Primary Role:** Enforce coding standards compliance and orchestrate multi-language quality gates
-
-**Key Responsibilities:**
-- **Standards Orchestration:** Coordinate coding standards enforcement across Go, Python, TypeScript, and JavaScript
-- **Static Analysis Integration:** Configure and execute static analysis tools for each language
-- **AI-Augmented Review:** Leverage AI assistance for code quality assessment and standards compliance
-- **Quality Gate Enforcement:** Validate code against QMS standards before merge
-- **Standards Evolution:** Monitor and update coding standards based on industry best practices
-- **Compliance Reporting:** Generate standards compliance reports for QMS audit trails
-
-## Capabilities
+## Core Functionality
 
 ### 1. Multi-Language Standards Enforcement
-- **Go Standards:** SOLID principles, guard clauses, error handling patterns
-- **Python Standards:** PEP 8, type hints, async patterns, testing conventions
-- **TypeScript Standards:** Strict typing, React patterns, accessibility compliance
-- **JavaScript Standards:** Modern ES6+, security patterns, performance optimization
 
-### 2. Static Analysis Tool Integration
-- **Go:** `golangci-lint`, `govulncheck`, `gosec`
-- **Python:** `flake8`, `black`, `mypy`, `bandit`
-- **TypeScript:** `eslint`, `prettier`, `typescript-eslint`
-- **JavaScript:** `eslint`, `prettier`, `@typescript-eslint/parser`
+**Supported Languages:**
+- **Go**: SOLID principles, effective Go patterns, concurrency safety
+- **Python**: PEP 8/257, type hints, performance best practices
+- **TypeScript/JavaScript**: ESLint rules, React patterns, accessibility
+- **Rust**: Ownership safety, performance optimization, async patterns
+- **Java**: Spring Boot patterns, testing standards, security practices
 
-### 3. AI-Augmented Code Review
-- **Context-Aware Analysis:** AI-assisted code review with project-specific context
-- **Standards Compliance:** Automated detection of standards violations
-- **Improvement Suggestions:** AI-generated recommendations for code quality enhancement
-- **Learning Integration:** Continuous improvement of review accuracy
+### 2. AI-Augmented Validation
 
-## Integration Points
+**Pattern Recognition:**
+- Automatic detection of code quality issues
+- Context-aware suggestions for improvements
+- Learning from team coding patterns
+- Predictive identification of potential problems
 
-### Language-Specific QMS Modes
-- **dev-golang-qms:** Go-specific standards and tooling
-- **dev-python-qms:** Python-specific standards and tooling
-- **util-typescript:** TypeScript/React standards (enhanced with QMS context)
-- **dev-react:** JavaScript/React patterns (enhanced with QMS context)
+**Smart Suggestions:**
+- Real-time code improvement recommendations
+- Multiple solution options with explanations
+- Integration with existing codebase patterns
+- Performance and security considerations
 
-### Quality Gate Integration
-- **qms-cicd-enforcer:** Pipeline integration for automated standards checking
-- **qms-code-reviewer:** Integration with 4-step QMS review process
-- **qms-dod-validator:** Standards compliance validation for task completion
+### 3. Automated Quality Gates
 
-### Workflow Integration
-- **GitHub Actions:** Pre-commit and PR validation workflows
-- **MDTM System:** Standards requirements in task templates
-- **Session Management:** Standards compliance tracking and audit trails
+**Pre-Commit Hooks:**
+- Standards compliance validation
+- Security vulnerability scanning
+- Complexity threshold checking
+- Documentation completeness verification
 
-## Configuration Schema
+**CI/CD Integration:**
+- GitHub Actions workflow integration
+- Branch protection rule enforcement
+- Automated PR quality gates
+- Compliance reporting and metrics
+
+### 4. Real-Time Development Support
+
+**IDE Integration:**
+- Real-time syntax and style validation
+- Inline suggestions and fixes
+- Context-aware documentation links
+- Performance optimization hints
+
+**Development Workflow:**
+- Automatic formatting on save
+- Intelligent import organization
+- Code template suggestions
+- Best practice reminders
+
+## Usage Patterns
+
+### 1. Automatic Validation
+
+The mode automatically validates code when:
+- Files are saved in the IDE
+- Pre-commit hooks are triggered
+- Pull requests are created
+- Manual validation is requested
+
+### 2. Interactive Mode
+
+```bash
+# Manual validation request
+roo qms-coding-standards validate --file src/main.go --language go
+
+# Get standards for specific language
+roo qms-coding-standards standards --language python --topic security
+
+# Generate compliance report
+roo qms-coding-standards report --format md --output qms-report.md
+```
+
+### 3. Integration with Development Modes
 
 ```toml
-[qms_context]
-standards_source = "file:///Users/jasongoecke/Desktop/Creo QMS/..."
-languages = ["go", "python", "typescript", "javascript"]
-enforcement_level = "mandatory"
-ai_augmented_rules = true
-static_analysis_required = true
-pre_commit_hooks = true
-
-[standards_config]
-go_standards = "strict"
-python_standards = "pep8-extended"
-typescript_standards = "strict-typing"
-javascript_standards = "modern-es6"
-
-[tooling_config]
-golangci_lint_config = ".golangci.yml"
-flake8_config = ".flake8"
-eslint_config = ".eslintrc.json"
-prettier_config = ".prettierrc"
-
-[ai_assistance]
-context_files = [".roo", ".ruru", ".roomodes"]
-review_guidelines = "qms-coding-standards.md"
-suggestion_threshold = 0.8
-
-[reporting]
-output_format = "md"
-include_suggestions = true
-audit_trail = true
+# In dev-golang.mode.md
+[enhancements]
+qms_integration = true
+standards_validation = "pre-commit"
+ai_suggestions = true
+compliance_reporting = true
 ```
 
-## Operational Modes
+## Standards Categories
 
-### 1. Standards Validation Mode
-**Trigger:** Pre-commit hooks, PR creation, manual validation requests
-- Execute static analysis tools for all configured languages
-- Validate code against language-specific standards
-- Generate compliance reports with violation details
-- Provide AI-assisted improvement suggestions
+### 1. Code Quality Standards
 
-### 2. Review Enhancement Mode
-**Trigger:** Code review requests, MDTM task validation
-- Enhance existing code reviews with standards compliance checks
-- Provide context-aware suggestions for standards alignment
-- Validate AI-generated code against QMS requirements
-- Update review checklists with standards-specific items
+**Readability:**
+- Clear naming conventions
+- Consistent formatting
+- Meaningful comments and documentation
+- Logical code organization
 
-### 3. Continuous Improvement Mode
-**Trigger:** Scheduled analysis, post-merge validation
-- Monitor standards compliance trends
-- Identify recurring violation patterns
-- Propose standards updates based on analysis
-- Update AI models with new patterns and rules
+**Maintainability:**
+- Single responsibility principle
+- Dependency injection
+- Interface segregation
+- Proper error handling
 
-## Delegation Patterns
+### 2. Performance Standards
 
-### To Language-Specific QMS Modes
+**Efficiency:**
+- Algorithm complexity analysis
+- Memory usage optimization
+- Database query optimization
+- Caching strategies
+
+**Scalability:**
+- Resource management
+- Concurrent processing patterns
+- Load distribution
+- Performance monitoring
+
+### 3. Security Standards
+
+**Vulnerability Prevention:**
+- Input validation
+- SQL injection prevention
+- XSS protection
+- CSRF mitigation
+
+**Secure Coding:**
+- Authentication/authorization
+- Data encryption
+- Secure communication
+- Audit logging
+
+### 4. Testing Standards
+
+**Coverage Requirements:**
+- Unit test coverage ≥80%
+- Integration test coverage
+- E2E test scenarios
+- Performance test baselines
+
+**Test Quality:**
+- AAA pattern compliance
+- Mock/stub best practices
+- Deterministic test execution
+- Proper test isolation
+
+## AI Enhancement Features
+
+### 1. Pattern Learning
+
+**Codebase Analysis:**
+- Automatic learning of team coding patterns
+- Identification of project-specific conventions
+- Evolution tracking of standards over time
+- Custom rule generation based on patterns
+
+### 2. Intelligent Suggestions
+
+**Context-Aware Help:**
+- Project-specific best practices
+- Language-specific optimizations
+- Team preference integration
+- Historical success pattern analysis
+
+### 3. Predictive Analysis
+
+**Issue Prevention:**
+- Early detection of potential problems
+- Complexity trend analysis
+- Performance regression prediction
+- Security vulnerability forecasting
+
+## Configuration
+
+### 1. Language-Specific Rules
+
+```toml
+# .ruru/modes/qms-coding-standards/config/languages.toml
+[go]
+max_line_length = 120
+tab_width = 4
+use_struct_tags = true
+require_comments = true
+
+[python]
+max_line_length = 88
+use_type_hints = true
+require_docstrings = true
+max_function_length = 50
+
+[typescript]
+strict_mode = true
+no_implicit_any = true
+exact_optional_property_types = true
+no_unused_locals = true
 ```
-qms-coding-standards → dev-golang-qms: "Validate Go code standards: [files]"
-qms-coding-standards → dev-python-qms: "Validate Python code standards: [files]"
-qms-coding-standards → util-typescript: "Validate TypeScript standards: [files]"
-qms-coding-standards → dev-react: "Validate JavaScript standards: [files]"
+
+### 2. Enforcement Levels
+
+```toml
+# .ruru/modes/qms-coding-standards/config/enforcement.toml
+[levels]
+strict = { warnings_as_errors = true, allow_suppressions = false }
+moderate = { warnings_as_errors = false, allow_suppressions = true }
+lenient = { warnings_as_errors = false, allow_suppressions = true, auto_fix = true }
 ```
 
-### From Quality Coordinators
+### 3. AI Configuration
+
+```toml
+# .ruru/modes/qms-coding-standards/config/ai.toml
+[ai_features]
+pattern_recognition = true
+auto_suggestions = true
+context_aware = true
+learning_enabled = true
+confidence_threshold = 0.8
 ```
-qms-quality-coordinator → qms-coding-standards: "Validate standards compliance for PR: [URL]"
-qms-compliance-coordinator → qms-coding-standards: "Generate compliance report for: [scope]"
+
+## Integration Examples
+
+### 1. GitHub Actions Integration
+
+```yaml
+# .github/workflows/qms-validation.yml
+name: QMS Standards Validation
+on: [pull_request, push]
+
+jobs:
+  qms-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: QMS Standards Check
+        run: npx roo-cli qms-coding-standards validate --all
+      - name: AI Pattern Analysis
+        run: npx roo-cli qms-coding-standards ai-analyze
+      - name: Generate Compliance Report
+        run: npx roo-cli qms-coding-standards report --output qms-report.md
 ```
 
-### To CI/CD Enforcer
+### 2. Pre-commit Hook Integration
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+
+# Run QMS validation
+npx roo-cli qms-coding-standards validate --staged
+
+# Check exit code
+if [ $? -ne 0 ]; then
+    echo "QMS validation failed. Please fix standards violations."
+    exit 1
+fi
 ```
-qms-coding-standards → qms-cicd-enforcer: "Configure quality gates for standards: [config]"
-```
 
-## Quality Gates Implementation
+## Metrics and Reporting
 
-### Pre-Commit Quality Gates
-- **Trigger:** `git commit` on feature branches
-- **Actions:** Run static analysis, validate standards compliance
-- **Failure Response:** Block commit with detailed violation report
-- **Success Response:** Allow commit, log compliance status
+### 1. Compliance Metrics
 
-### Pull Request Quality Gates
-- **Trigger:** PR creation/update to main/stable branches
-- **Actions:** Full standards validation, AI review enhancement
-- **Failure Response:** Request changes with specific improvement requirements
-- **Success Response:** Approve and enable merge, generate compliance certificate
+- **Overall Compliance Rate**: Percentage of code meeting standards
+- **Language-specific Compliance**: Per-language quality scores
+- **Trend Analysis**: Improvement over time
+- **Violation Categories**: Most common issues by type
 
-### Task Completion Quality Gates
-- **Trigger:** MDTM task status change to "🟢 Done"
-- **Actions:** Validate standards compliance for changed files
-- **Failure Response:** Return task to "🟡 To Do" with standards violations
-- **Success Response:** Confirm completion, update compliance metrics
+### 2. AI Performance Metrics
 
-## Knowledge Base Integration
+- **Suggestion Accuracy**: Percentage of accepted AI suggestions
+- **Detection Rate**: Issues found by AI vs manual review
+- **Processing Time**: Validation speed improvements
+- **Learning Progress**: AI model improvement over time
 
-### Standards Documentation
-- **Location:** `.ruru/modes/qms-coding-standards/kb/`
-- **Files:**
-  - `standards-overview.md`: Comprehensive standards guide
-  - `language-specific-standards/`: Per-language detailed rules
-  - `ai-review-guidelines.md`: AI-assisted review procedures
-  - `tool-configuration.md`: Static analysis tool setup
+### 3. Team Productivity Metrics
 
-### Procedure Documentation
-- **Location:** `.ruru/modes/qms-coding-standards/kb/procedures/`
-- **Files:**
-  - `pre-commit-validation.md`: Pre-commit hook procedures
-  - `pr-review-enhancement.md`: PR review enhancement workflow
-  - `standards-update-process.md`: Standards evolution procedures
-  - `compliance-reporting.md`: Reporting and audit procedures
+- **Time Saved**: Hours saved through automation
+- **Error Reduction**: Decrease in post-review fixes
+- **Review Efficiency**: Faster review cycles
+- **Developer Satisfaction**: Feedback on tool usefulness
 
-## Metrics & Reporting
+## Future Enhancements
 
-### Compliance Metrics
-- **Standards Adherence Rate:** Percentage of code meeting standards
-- **Violation Trends:** Types and frequency of standards violations
-- **Review Enhancement Success:** AI suggestion acceptance rate
-- **Gate Failure Rate:** Percentage of blocked commits/PRs
+### 1. Advanced AI Features
 
-### Report Generation
-- **Standards Compliance Report:** Overall project compliance status
-- **Violation Analysis Report:** Detailed breakdown by language and rule
-- **Improvement Tracking Report:** Progress on addressing violations
-- **Audit Trail Report:** Historical compliance data for QMS audits
+- **Code Generation**: AI-assisted code creation following standards
+- **Architecture Review**: High-level design pattern validation
+- **Performance Optimization**: Automated performance improvement suggestions
+- **Security Analysis**: Advanced vulnerability detection
 
-## Error Handling & Recovery
+### 2. Ecosystem Integration
 
-### Common Error Scenarios
-- **Tool Configuration Issues:** Missing config files, incompatible versions
-- **Language Detection Failures:** Unable to identify file language
-- **AI Service Unavailability:** Fallback to rule-based validation
-- **Resource Constraints:** Large codebase analysis optimization
+- **IDE Plugins**: Direct integration with popular editors
+- **CI/CD Platforms**: Support for additional pipeline tools
+- **Project Management**: Integration with task tracking systems
+- **Knowledge Bases**: Connection to external standards repositories
 
-### Recovery Procedures
-- **Configuration Errors:** Generate template configs, request manual setup
-- **Detection Failures:** Request explicit language specification
-- **Service Outages:** Continue with cached rules and local analysis
-- **Performance Issues:** Implement incremental analysis, file size limits
+### 3. Advanced Analytics
 
-## Integration with AI Assistant
+- **Predictive Maintenance**: Early warning for technical debt
+- **Team Analytics**: Individual and team performance insights
+- **Process Optimization**: Workflow efficiency improvements
+- **Quality Forecasting**: Future quality trend predictions
 
-### Context Enhancement
-- **Standards Context:** Load current standards into AI context
-- **Project-Specific Rules:** Include project-specific coding conventions
-- **Historical Patterns:** Reference past violations and corrections
-- **Quality Benchmarks:** Provide quality score targets
-
-### AI-Assisted Workflows
-- **Code Review Enhancement:** AI suggests standards improvements
-- **Standards Updates:** AI proposes rule updates based on analysis
-- **Training Data Generation:** Collect validated examples for model improvement
-- **Compliance Validation:** AI validates adherence to complex rules
-
-This mode serves as the central nervous system for coding standards enforcement, ensuring consistent, high-quality code across all languages while maintaining flexibility for project-specific requirements and continuous improvement through AI augmentation.
+This mode serves as the cornerstone of automated quality assurance in the Roo Commander ecosystem, ensuring consistent, high-quality code across all languages and projects through intelligent, AI-augmented validation.
