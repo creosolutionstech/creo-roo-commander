@@ -85,7 +85,7 @@ To get the most out of Roo Commander, it helps to understand these key ideas:
 
 The recommended installation method uses the pre-built release:
 
-1.  **Download:** Go to the [Roo Commander Releases page](https://github.com/jezweb/roo-commander/releases) and download the latest `roo-commander-vX.Y.Z-Codename.zip` file. *(Currently: `roo-commander-v7.1.2-Wallaby.zip`)*
+1.  **Download:** Go to the [Roo Commander Releases page](https://github.com/jezweb/roo-commander/releases) and download the latest `roo-commander-vX.Y.Z-Codename.zip` file. *(Currently: `roo-commander-v7.1.5-Wallaby.zip`)*
 2.  **Extract:** Unzip the contents directly into the **root directory** of your VS Code project workspace. This is the top-level folder containing your code, `.git` directory (if applicable), etc.
     *   *This will create/overwrite hidden folders like `.ruru/` and `.roo/` in your workspace root, containing the Roo Commander configurations and modes.*
 3.  **Reload VS Code:** Reload the VS Code window (`Ctrl+Shift+P` or `Cmd+Shift+P` -> `"Developer: Reload Window"`) to ensure Roo Code recognizes the new mode configurations.
@@ -262,6 +262,107 @@ require_documentation = true
 max_complexity = 10
 require_type_hints = true
 ```
+
+```
+
+## 🎥 LiveKit Real-Time Communication Modes
+
+Roo Commander includes specialized modes for integrating LiveKit's real-time communication capabilities into your applications. These modes provide seamless audio, video, and data streaming functionality with enterprise-grade performance and security.
+
+### 🎯 LiveKit Core Features
+
+*   **Real-Time Communication:** High-performance WebRTC-based audio and video streaming
+*   **Scalable Architecture:** Built for global deployments with automatic load balancing
+*   **Security First:** End-to-end encryption with enterprise security features
+*   **Multi-Platform Support:** SDKs for web, mobile, and desktop applications
+*   **Recording & Analytics:** Built-in recording capabilities and real-time analytics
+*   **Developer Experience:** Comprehensive APIs with excellent documentation
+
+### 🔧 LiveKit Modes
+
+#### **Communication Infrastructure Modes:**
+*   **`livekit-server-manager`:** LiveKit server deployment and configuration management
+*   **`livekit-client-integrator`:** Client-side SDK integration for web and mobile apps
+*   **`livekit-room-controller`:** Room lifecycle management and participant coordination
+*   **`livekit-stream-handler`:** Real-time stream processing and quality optimization
+*   **`livekit-recording-manager`:** Recording workflow automation and storage management
+
+#### **Developer Experience Modes:**
+*   **`livekit-react-developer`:** React-specific LiveKit integration patterns and best practices
+*   **`livekit-nextjs-specialist`:** Next.js optimized LiveKit implementations
+*   **`livekit-vue-expert`:** Vue.js LiveKit integration and component development
+
+### 🎛️ Using LiveKit Modes
+
+#### **Basic Usage:**
+1. **Select LiveKit Mode:** Choose the appropriate LiveKit mode in Roo Code (e.g., `livekit-react-developer`)
+2. **Define Requirements:** Specify your communication needs (audio, video, screen sharing, etc.)
+3. **Generate Implementation:** Let the mode create the necessary code and configuration
+4. **Customize & Deploy:** Modify the generated code for your specific requirements
+
+#### **Development Workflow:**
+```bash
+# Integrate LiveKit into a React application
+1. Select livekit-react-developer mode
+2. Describe your communication requirements
+3. Mode generates components and hooks
+4. Customize for your specific use case
+5. Deploy with your preferred hosting solution
+```
+
+#### **Server Setup:**
+```bash
+# Set up LiveKit server infrastructure
+1. Select livekit-server-manager mode
+2. Configure server specifications
+3. Generate deployment configurations
+4. Deploy to cloud infrastructure
+```
+
+### 📊 LiveKit Benefits
+
+*   **Performance:** Sub-second latency with adaptive bitrate streaming
+*   **Reliability:** Built-in redundancy and automatic failover mechanisms
+*   **Security:** Enterprise-grade encryption and authentication
+*   **Scalability:** Handle thousands of concurrent participants
+*   **Developer Friendly:** Comprehensive SDKs with excellent documentation
+*   **Cost Effective:** Pay-as-you-go pricing with generous free tier
+
+### 🔐 Security & Compliance
+
+#### **Security Features:**
+*   **End-to-End Encryption:** All communication is encrypted in transit and at rest
+*   **Authentication:** JWT-based authentication with role-based access control
+*   **Network Security:** Firewall rules, DDoS protection, and secure WebSocket connections
+*   **Compliance:** GDPR, HIPAA, and SOC 2 compliant infrastructure
+
+#### **Best Practices:**
+*   **Token Management:** Use short-lived tokens with appropriate scopes
+*   **Network Configuration:** Implement proper firewall rules and SSL/TLS
+*   **Monitoring:** Enable logging and monitoring for security events
+*   **Updates:** Keep SDKs and server software updated
+
+### 🚀 Getting Started with LiveKit
+
+#### **Prerequisites:**
+*   LiveKit account (free tier available)
+*   API keys and secrets configured
+*   Development environment set up
+
+#### **Quick Start:**
+1. **Server Setup:** Use `livekit-server-manager` to configure your LiveKit server
+2. **Client Integration:** Use language-specific modes (e.g., `livekit-react-developer`) for client implementation
+3. **Room Management:** Implement room creation and participant management
+4. **Stream Handling:** Configure audio/video streams and data channels
+5. **Recording:** Set up recording and storage if needed
+
+### 📈 LiveKit Analytics & Monitoring
+
+The LiveKit modes integrate with monitoring and analytics tools to provide insights into:
+*   **Performance Metrics:** Latency, bandwidth usage, and connection quality
+*   **Usage Statistics:** Participant counts, room activity, and engagement metrics
+*   **Error Tracking:** Connection failures, stream issues, and troubleshooting data
+*   **Cost Optimization:** Usage patterns to optimize infrastructure costs
 
 ## Contributing
 
